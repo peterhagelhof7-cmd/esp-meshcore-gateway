@@ -120,7 +120,7 @@ Login-Schutz der Weboberfläche ist Pflicht (Konsole kann `erase`, Private-Key-E
 | M1 🟡 | Eigenes Repo: Submodul + eigenes Env, Repeater-Kern + WLAN/Installer-AP + Status-Seite, CPU 240 MHz | Build grün V4 + R8 (2026-10-13); **HW-Test offen** |
 | M2 🟡 | Webkonsole (HTTP-Polling → CLI-Queue, E10) + Live-Paket-Log | Build grün V4 + R8, UI-Test gegen Mock 16/16 (2026-10-13); **HW-Test offen** |
 | M3 🟡 | Komplette MeshCore-Einstellungsseite + hansemesh-Profil (E15) + Backup/Restore + Passwort; NTP vorgezogen (E17) | Build grün V4 + R8, UI-Test gegen Mock 42/42 (2026-10-13); **HW-Test offen** |
-| M4 | Kanäle: Verwaltung + Senden (+ Empfang anzeigen) | Nachricht kommt in offizieller App im Kanal an |
+| M4 🟡 | Kanäle: Verwaltung (Public/Hashtag/Privat, Scope) + Senden + Empfang (E18) | Build grün, UI-Test gegen Mock (2026-10-14); **Funk-Test mit App offen** |
 | M5 | OTA (Identität + Downgrade-Check), NTP→Uhr, OLED-Status | OTA-Upload auf HW |
 | M6 | Sensormeter-Poller + Regel-Engine | Grenzwert provozieren → Kanalnachricht |
 

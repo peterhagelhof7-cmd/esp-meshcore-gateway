@@ -4,6 +4,7 @@
 
 LogBuffer console_log(150);
 LogBuffer packet_log(300);
+LogBuffer channel_log(200);
 
 LogBuffer::LogBuffer(size_t capacity) : _cap(capacity) {}
 

@@ -12,9 +12,11 @@
 
 #include "GatewayMesh.h"
 
+#include "ChannelStore.h"
 #include "CliBridge.h"
 #include "GatewayConfig.h"
 #include "LogBuffer.h"
+#include "MeshActions.h"
 #include "Profile.h"
 #include "GatewayStatus.h"
 #include "NetworkManager.h"
@@ -59,7 +61,10 @@ void setup() {
   // Früh, damit schon die ersten Pakete/Meldungen im Web-Log landen.
   console_log.begin();
   packet_log.begin();
+  channel_log.begin();
   cli_bridge::begin();
+  mesh_actions::begin();
+  channel_store::begin();
 
   board.begin();
   Serial.printf("MeshCore Gateway %s (MeshCore %s), CPU %u MHz\n",
@@ -181,6 +186,7 @@ void loop() {
   rtc_clock.tick();
 
   // --- Gateway-Erweiterungen ---
+  mesh_actions::process();
   if (cli_bridge::process()) {
     next_status_update = millis();   // geänderte Einstellungen sofort im Snapshot
   }

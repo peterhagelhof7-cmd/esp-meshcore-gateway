@@ -6,10 +6,12 @@
 
 #include <vector>
 
+#include "ChannelStore.h"
 #include "CliBridge.h"
 #include "GatewayConfig.h"
 #include "GatewayStatus.h"
 #include "LogBuffer.h"
+#include "MeshActions.h"
 #include "NetworkManager.h"
 #include "Profile.h"
 #include "web/index_html.h"
@@ -293,6 +295,106 @@ static void sendLog(AsyncWebServerRequest* req, LogBuffer& log) {
   req->send(200, "application/json", j);
 }
 
+// ---------- M4: Kanäle ----------
+
+static String formParam(AsyncWebServerRequest* req, const char* name) {
+  return req->hasParam(name, true) ? req->getParam(name, true)->value() : String();
+}
+
+static void handleChannelsGet(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  GwChannel ch[channel_store::MAX_CHANNELS];
+  channel_store::list(ch);
+  String j;
+  j.reserve(1536);
+  j += "{\"max\":";
+  j += String(channel_store::MAX_CHANNELS);
+  j += ",\"channels\":[";
+  bool first = true;
+  for (int i = 0; i < channel_store::MAX_CHANNELS; i++) {
+    if (!ch[i].used) continue;
+    if (!first) j += ',';
+    first = false;
+    channel_store::Kind k = channel_store::kindOf(ch[i]);
+    j += "{\"idx\":";
+    j += String(i);
+    j += ",\"name\":\"";
+    j += jsonEscape(ch[i].name);
+    j += "\",\"kind\":\"";
+    j += k == channel_store::Kind::PUBLIC ? "public" : (k == channel_store::Kind::HASHTAG ? "hashtag" : "private");
+    j += "\",\"scope\":\"";
+    j += jsonEscape(ch[i].scope);
+    j += "\",\"hash\":\"";
+    char hb[4];
+    snprintf(hb, sizeof(hb), "%02x", ch[i].hash);
+    j += hb;
+    j += "\",\"key_b64\":\"";
+    j += channel_store::keyBase64(ch[i]);
+    j += "\",\"key_hex\":\"";
+    j += channel_store::keyHex(ch[i]);
+    j += "\"}";
+  }
+  j += "]}";
+  req->send(200, "application/json", j);
+}
+
+static void handleChannelsPost(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String action = formParam(req, "action");
+  String err;
+  if (action == "add") {
+    String kind = formParam(req, "kind");
+    channel_store::Kind k = kind == "public" ? channel_store::Kind::PUBLIC
+                          : kind == "hashtag" ? channel_store::Kind::HASHTAG
+                          : channel_store::Kind::PRIVATE;
+    String key = formParam(req, "key");
+    key.trim();
+    int idx = channel_store::add(k, formParam(req, "name").c_str(), key.c_str(), formParam(req, "scope").c_str(), err);
+    if (idx < 0) {
+      req->send(400, "application/json", "{\"error\":\"" + jsonEscape(err) + "\"}");
+      return;
+    }
+    req->send(200, "application/json", String("{\"ok\":true,\"idx\":") + idx + "}");
+  } else if (action == "delete") {
+    if (!channel_store::remove(formParam(req, "idx").toInt())) {
+      req->send(404, "application/json", "{\"error\":\"Kanal unbekannt\"}");
+      return;
+    }
+    req->send(200, "application/json", "{\"ok\":true}");
+  } else if (action == "scope") {
+    if (!channel_store::setScope(formParam(req, "idx").toInt(), formParam(req, "scope").c_str(), err)) {
+      req->send(400, "application/json", "{\"error\":\"" + jsonEscape(err) + "\"}");
+      return;
+    }
+    req->send(200, "application/json", "{\"ok\":true}");
+  } else {
+    req->send(400, "application/json", "{\"error\":\"unbekannte Aktion\"}");
+  }
+}
+
+static void handleChannelSend(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  int idx = formParam(req, "idx").toInt();
+  String text = formParam(req, "text");
+  text.replace("\r", "");
+  text.replace("\n", " ");
+  text.trim();
+  GwChannel c;
+  if (!channel_store::get(idx, c)) {
+    req->send(404, "application/json", "{\"error\":\"Kanal unbekannt\"}");
+    return;
+  }
+  if (text.isEmpty() || text.length() > mesh_actions::MAX_TEXT) {
+    req->send(400, "application/json", "{\"error\":\"Text 1-160 Zeichen\"}");
+    return;
+  }
+  if (!mesh_actions::sendChannel(idx, text.c_str(), mesh_actions::Origin::WEB)) {
+    req->send(503, "application/json", "{\"error\":\"Warteschlange voll, bitte kurz warten\"}");
+    return;
+  }
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
 static void handleReboot(AsyncWebServerRequest* req) {
   if (!checkAuth(req)) return;
   req->send(200, "application/json", "{\"ok\":true}");
@@ -316,6 +418,10 @@ void web_ui::begin() {
   server.on(AsyncURIMatcher::exact("/api/cli/batch"), HTTP_POST, handleCliBatch);
   server.on(AsyncURIMatcher::exact("/api/cli/job"), HTTP_GET, handleCliJob);
   server.on(AsyncURIMatcher::exact("/api/profile"), HTTP_GET, handleProfile);
+  server.on(AsyncURIMatcher::exact("/api/channels"), HTTP_GET, handleChannelsGet);
+  server.on(AsyncURIMatcher::exact("/api/channels"), HTTP_POST, handleChannelsPost);
+  server.on(AsyncURIMatcher::exact("/api/channels/send"), HTTP_POST, handleChannelSend);
+  server.on(AsyncURIMatcher::exact("/api/messages"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, channel_log); });
   server.on(AsyncURIMatcher::exact("/api/console"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, console_log); });
   server.on(AsyncURIMatcher::exact("/api/packets"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, packet_log); });
   server.onNotFound([](AsyncWebServerRequest* req) {

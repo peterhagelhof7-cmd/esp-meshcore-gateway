@@ -183,6 +183,64 @@ class FakeCli:
         return 'Unknown command'
 
 
+import base64, hashlib
+PUBLIC_KEY = bytes.fromhex('8b3387e9c5cdea6ac9e5edbaa115cd72')
+logs['messages'] = []
+seq['messages'] = 1
+CAP['messages'] = 200
+
+
+class FakeChannels:
+    """Nachbau von ChannelStore (Schlüssel-/Namensregeln wie in der Firmware)."""
+    MAX = 8
+
+    def __init__(self):
+        self.ch = [None] * self.MAX
+
+    def add(self, kind, name, key, scope):
+        name = (name or '').strip()
+        if kind == 'public':
+            name = name or 'Public'
+            secret = PUBLIC_KEY
+        elif kind == 'hashtag':
+            if not name.startswith('#'): name = '#' + name
+            name = name.lower()
+            if len(name) < 2: return None, 'Name fehlt'
+            if not re.fullmatch(r'#[a-z0-9_-]+', name): return None, 'Hashtag-Kanal: nur a-z, 0-9, - und _'
+            secret = hashlib.sha256(name.encode()).digest()[:16]
+        else:
+            if not name: return None, 'Name fehlt'
+            if name.startswith('#'): return None, 'Private Kanäle ohne #'
+            if key:
+                try:
+                    secret = bytes.fromhex(key) if len(key) == 32 else base64.b64decode(key, validate=True)
+                except Exception:
+                    secret = b''
+                if len(secret) != 16: return None, 'Schlüssel: 16 Byte als Base64 oder 32 Hex-Zeichen'
+            else:
+                secret = os.urandom(16)
+        if scope and not re.fullmatch(r'#?[A-Za-z0-9._-]+', scope): return None, 'Scope: Regionsname aus a-z, 0-9, - _ .'
+        for c in self.ch:
+            if c and c['secret'] == secret: return None, 'Kanal mit diesem Schlüssel existiert schon: ' + c['name']
+        for i in range(self.MAX):
+            if self.ch[i] is None:
+                self.ch[i] = {'name': name, 'secret': secret, 'scope': scope or ''}
+                return i, None
+        return None, 'Maximal 8 Kanäle'
+
+    def json(self):
+        out = []
+        for i, c in enumerate(self.ch):
+            if not c: continue
+            kind = 'public' if c['secret'] == PUBLIC_KEY else ('hashtag' if c['name'].startswith('#') else 'private')
+            out.append({'idx': i, 'name': c['name'], 'kind': kind, 'scope': c['scope'],
+                        'hash': '%02x' % hashlib.sha256(c['secret']).digest()[0],
+                        'key_b64': base64.b64encode(c['secret']).decode(), 'key_hex': c['secret'].hex()})
+        return {'max': self.MAX, 'channels': out}
+
+
+chans = FakeChannels()
+
 cli = FakeCli()
 PROFILE = load_profile()
 jobs = {}
@@ -246,7 +304,7 @@ class H(BaseHTTPRequestHandler):
               'stats_radio': {'noise_floor': -112, 'last_rssi': -90, 'last_snr': 7.5, 'tx_air_secs': 3, 'rx_air_secs': 12},
               'stats_packets': {'recv': 10, 'sent': 5, 'flood_tx': 5, 'direct_tx': 0, 'flood_rx': 10, 'direct_rx': 0, 'recv_errors': 0},
               'wifi': {'mode': 'station', 'ssid': 'TestNetz', 'ip': '192.168.1.50', 'rssi': -55, 'mac': 'AA:BB:CC:DD:EE:FF', 'hostname': 'meshcore-gw'}})
-        if u.path in ('/api/console', '/api/packets'):
+        if u.path in ('/api/console', '/api/packets', '/api/messages'):
             name = u.path.split('/')[-1]
             since = int(q.get('since', ['0'])[0])
             with lock:
@@ -264,6 +322,9 @@ class H(BaseHTTPRequestHandler):
             return self.send_json(j) if j else self.send_json({'error': 'Auftrag unbekannt'}, 404)
         if u.path == '/api/profile':
             return self.send_json(PROFILE)
+        if u.path == '/api/channels':
+            with lock:
+                return self.send_json(chans.json())
         self.send_response(404); self.end_headers()
 
     def do_POST(self):
@@ -277,6 +338,34 @@ class H(BaseHTTPRequestHandler):
             if not cmds or len(cmds) > 40:
                 return self.send_json({'error': '1 bis 40 Befehle pro Auftrag'}, 400)
             return self.send_json({'ok': True, 'id': submit(cmds, form.get('quiet', ['0'])[0] == '1')})
+        if u.path == '/api/channels':
+            f = lambda k: form.get(k, [''])[0]
+            a = f('action')
+            with lock:
+                if a == 'add':
+                    idx, err = chans.add(f('kind'), f('name'), f('key'), f('scope'))
+                    return self.send_json({'error': err}, 400) if err else self.send_json({'ok': True, 'idx': idx})
+                i = int(f('idx') or -1)
+                if not (0 <= i < chans.MAX) or not chans.ch[i]:
+                    return self.send_json({'error': 'Kanal unbekannt'}, 404)
+                if a == 'delete':
+                    chans.ch[i] = None
+                    return self.send_json({'ok': True})
+                if a == 'scope':
+                    sc = f('scope')
+                    if sc and not re.fullmatch(r'#?[A-Za-z0-9._-]+', sc):
+                        return self.send_json({'error': 'Scope: Regionsname aus a-z, 0-9, - _ .'}, 400)
+                    chans.ch[i]['scope'] = sc
+                    return self.send_json({'ok': True})
+            return self.send_json({'error': 'unbekannte Aktion'}, 400)
+        if u.path == '/api/channels/send':
+            i = int(form.get('idx', ['-1'])[0]); t = form.get('text', [''])[0].strip()
+            with lock:
+                c = chans.ch[i] if 0 <= i < chans.MAX else None
+            if not c: return self.send_json({'error': 'Kanal unbekannt'}, 404)
+            if not t or len(t.encode()) > 160: return self.send_json({'error': 'Text 1-160 Zeichen'}, 400)
+            push('messages', 'S', '\t'.join([str(i), c['name'], '', '0', cli.p['name'] + ': ' + t]))
+            return self.send_json({'ok': True})
         if u.path == '/api/reboot':
             return self.send_json({'ok': True})
         self.send_response(404); self.end_headers()
@@ -287,6 +376,11 @@ def traffic():
     while True:
         time.sleep(0.5); i += 1
         push('packets', 'R' if i % 2 else 'T', f'len={20+i%30} GRP_TXT(5) route=F hops=1 payload=25 #{i}')
+        if i % 4 == 0:   # alle 2 s eine "empfangene" Nachricht im ersten Kanal
+            with lock:
+                c = next(((k, x) for k, x in enumerate(chans.ch) if x), None)
+            if c:
+                push('messages', 'M', '\t'.join([str(c[0]), c[1]['name'], '6.5', '2', 'Funker%d: Hallo Nr. %d' % (i % 3, i)]))
 
 
 threading.Thread(target=traffic, daemon=True).start()

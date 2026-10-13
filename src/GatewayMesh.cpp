@@ -1,6 +1,10 @@
 #include "GatewayMesh.h"
 
 #include "LogBuffer.h"
+#include "ChannelStore.h"
+
+#include <helpers/TxtDataHelpers.h>
+#include <helpers/BaseChatMesh.h>
 
 static const char* payloadTypeName(uint8_t t) {
   switch (t) {
@@ -62,4 +66,117 @@ void GatewayMesh::logTxFail(mesh::Packet* pkt, int len) {
   char buf[LogBuffer::LINE_LEN];
   formatPacket(buf, sizeof(buf), pkt, len);
   packet_log.push('F', getRTCClock()->getCurrentTime(), buf);
+}
+
+// ---------------------------------------------------------------------------
+// M4: Gruppenkanäle
+// ---------------------------------------------------------------------------
+
+static void toGroupChannel(const GwChannel& c, mesh::GroupChannel& out) {
+  // Wie BaseChatMesh::addChannel: 32-Byte-Secret-Feld, 16-Byte-Schlüssel,
+  // Rest Nullen (geht so auch in den HMAC ein).
+  memset(&out, 0, sizeof(out));
+  memcpy(out.secret, c.secret, sizeof(c.secret));
+  out.hash[0] = c.hash;
+}
+
+int GatewayMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) {
+  int idx[channel_store::MAX_CHANNELS];
+  int n = channel_store::findByHash(hash[0], idx, max_matches < channel_store::MAX_CHANNELS ? max_matches : channel_store::MAX_CHANNELS);
+  int out = 0;
+  for (int i = 0; i < n; i++) {
+    GwChannel c;
+    if (channel_store::get(idx[i], c)) toGroupChannel(c, channels[out++]);
+  }
+  return out;
+}
+
+void GatewayMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel,
+                                  uint8_t* data, size_t len) {
+  if (type != PAYLOAD_TYPE_GRP_TXT || len < 5) return;     // GRP_DATA zeigt das Gateway nicht an
+  if ((data[4] >> 2) != TXT_TYPE_PLAIN) return;            // wie BaseChatMesh::onGroupDataRecv
+
+  uint32_t timestamp;
+  memcpy(&timestamp, data, 4);
+
+  // Text ist nicht nullterminiert und kann Padding-Nullen enthalten.
+  char text[MAX_PACKET_PAYLOAD + 1];
+  size_t tlen = len - 5;
+  if (tlen > MAX_PACKET_PAYLOAD) tlen = MAX_PACKET_PAYLOAD;
+  memcpy(text, &data[5], tlen);
+  text[tlen] = 0;
+  for (char* p = text; *p; p++) {
+    if (*p == '\t' || *p == '\n' || *p == '\r') *p = ' ';   // Trennzeichen im Log-Format
+  }
+
+  // Kanal anhand des Schlüssels bestimmen (Hash ist nur 1 Byte).
+  int idx = -1;
+  GwChannel c;
+  for (int i = 0; i < channel_store::MAX_CHANNELS; i++) {
+    if (channel_store::get(i, c) && memcmp(c.secret, channel.secret, sizeof(c.secret)) == 0) { idx = i; break; }
+  }
+  if (idx < 0) return;
+
+  char line[LogBuffer::LINE_LEN];
+  snprintf(line, sizeof(line), "%d\t%s\t%.1f\t%u\t%s", idx, c.name, packet->getSNR(),
+           (unsigned)packet->getPathHashCount(), text);
+  channel_log.push('M', timestamp, line);
+}
+
+bool GatewayMesh::sendChannelText(int channelIdx, const char* text, char* err, size_t errLen) {
+  GwChannel c;
+  if (!channel_store::get(channelIdx, c)) {
+    snprintf(err, errLen, "Kanal %d unbekannt", channelIdx);
+    return false;
+  }
+  if (!text || !*text) {
+    snprintf(err, errLen, "leerer Text");
+    return false;
+  }
+
+  // Aufbau wie BaseChatMesh::sendGroupMessage
+  uint8_t temp[5 + MAX_TEXT_LEN + 32];
+  uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
+  memcpy(temp, &timestamp, 4);
+  temp[4] = TXT_TYPE_PLAIN;
+  int prefix_len = snprintf((char*)&temp[5], MAX_TEXT_LEN, "%s: ", getNodeName());
+  int text_len = strlen(text);
+  if (text_len + prefix_len > MAX_TEXT_LEN) text_len = MAX_TEXT_LEN - prefix_len;
+  if (text_len <= 0) {
+    snprintf(err, errLen, "Knotenname zu lang");
+    return false;
+  }
+  memcpy(&temp[5 + prefix_len], text, text_len);
+  temp[5 + prefix_len + text_len] = 0;
+
+  mesh::GroupChannel gc;
+  toGroupChannel(c, gc);
+  mesh::Packet* pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, gc, temp, 5 + prefix_len + text_len);
+  if (!pkt) {
+    snprintf(err, errLen, "kein freier Paketpuffer");
+    return false;
+  }
+
+  // Scope (Region) wie RegionMap::getTransportKeysFor für öffentliche
+  // Regionen: Schlüssel = sha256("#name"), die ersten 16 Byte.
+  TransportKey scope;
+  memset(&scope, 0, sizeof(scope));
+  if (c.scope[0]) {
+    char tag[sizeof(c.scope) + 1];
+    snprintf(tag, sizeof(tag), "%s%s", c.scope[0] == '#' ? "" : "#", c.scope);
+    uint8_t h[32];
+    mesh::Utils::sha256(h, sizeof(h), (const uint8_t*)tag, strlen(tag));
+    memcpy(scope.key, h, sizeof(scope.key));
+  }
+  uint8_t path_hash_size = getNodePrefs()->path_hash_mode + 1;
+  sendFloodScoped(scope, pkt, 0, path_hash_size);
+
+  char line[LogBuffer::LINE_LEN];
+  char shown[MAX_TEXT_LEN + 1];
+  memcpy(shown, text, text_len);
+  shown[text_len] = 0;
+  for (char* p = shown; *p; p++) if (*p == '\t' || *p == '\n' || *p == '\r') *p = ' ';
+  snprintf(line, sizeof(line), "%d\t%s\t\t0\t%s: %s", channelIdx, c.name, getNodeName(), shown);
+  channel_log.push('S', timestamp, line);
+  return true;
 }

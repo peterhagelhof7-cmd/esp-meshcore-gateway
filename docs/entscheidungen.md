@@ -198,3 +198,44 @@ Synchronisation (stündlich) wird zusätzlich `rtc_clock.setCurrentTime()` aufge
 eventuell angeschlossene externe RTC (DS3231 via AutoDiscover) mitläuft.
 Grund: Laut hansemesh verwirft eine falsche Uhr Adverts und leert die Nachbarliste. Ohne RTC
 startet der ESP sonst bei Mai 2024.
+
+## E18 – M4: Kanäle im Repeater (2026-10-14, autonom entschieden)
+**Umsetzung (E1):** `GatewayMesh` überschreibt `searchChannelsByHash()` und `onGroupDataRecv()` und
+bekommt `sendChannelText()`. Das Paket wird **byte-gleich** zu `BaseChatMesh::sendGroupMessage`
+aufgebaut: 4 Byte Zeitstempel (`getCurrentTimeUnique`), `TXT_TYPE_PLAIN`, „Knotenname: Text“, max.
+160 Byte inklusive Präfix (`MAX_TEXT_LEN`), danach `createGroupDatagram(PAYLOAD_TYPE_GRP_TXT)`.
+Das Weiterleiten fremder Kanalpakete bleibt unverändert Sache des Repeaters.
+
+**Schlüssel und Hash wie in der Companion-App** (geprüft gegen docs/companion_protocol.md):
+- Public = `8b3387e9…cd72` (Base64 `izOH6cXN6mrJ5e26oRXNcg==`) → Hash **11**
+- Hashtag = erste 16 Byte von `sha256("#name")`, z. B. `#test` → `9cd8fcf2…` → Hash **d9**
+- Privat = 16 Byte zufällig (`esp_fill_random`) oder importiert (Base64 oder Hex)
+- Hash = erstes Byte von `sha256(secret[16])`, wie `BaseChatMesh::addChannel`
+
+**Entscheidungen:**
+- **Max. 8 Kanäle**, gespeichert in NVS (Namespace `gw`, Blob mit Versionsbyte). Sie überleben ein
+  MeshCore-`erase`.
+- **Hashtag-Namen werden kleingeschrieben**, erlaubt sind nur `a-z 0-9 - _`. hansemesh: Der Hash ist
+  case-sensitive, und iOS/Android haben dadurch schon doppelte Kanäle erzeugt.
+- **Scope pro Kanal** (wie in der App „ein Scope pro Kanal“). Der Transport-Schlüssel ist
+  `sha256("#region")[0..16]`, also dieselbe Ableitung wie `RegionMap::getTransportKeysFor` für
+  öffentliche Regionen, gesendet über `MyMesh::sendFloodScoped()`. Private `$`-Regionen werden nicht
+  unterstützt. **Standard: kein Scope**, weil ein Scope nur über Repeater läuft, die die Region
+  kennen. Das muss lokal abgesprochen sein.
+- Gesendet wird mit `path_hash_mode + 1` als Pfad-Hash-Größe, passend zur eigenen Einstellung
+  (Profil: 3 Byte).
+- **Kein Kanal ist vorbelegt.** Der Betreiber legt bewusst an, was er braucht. Für M6 bietet sich
+  ein privater Kanal an.
+- Empfangene Kanalnachrichten gehen in einen eigenen Ringpuffer (200 Zeilen, Typ M/S) mit Kanal,
+  SNR und Hops. Es gibt keine Persistenz, nach einem Neustart ist der Puffer leer. `GRP_DATA` wird
+  nicht angezeigt.
+- Senden aus dem Web läuft über eine eigene Queue (`MeshActions`, E4), die M6 mitnutzt.
+- Der Duty Cycle (10 %) wird vom Dispatcher für alle Sendungen durchgesetzt, auch für die des Gateways.
+- Kanäle stehen im Backup (privat mit Schlüssel). Beim Restore werden bereits vorhandene
+  übersprungen.
+- Die LogBuffer-Zeilenlänge ist von 200 auf 256 Byte gestiegen (Kanalname plus 160 Byte Text).
+
+**Verifikation:** Build grün. UI-Test gegen Mock: Hashtag-Normalisierung, Duplikat- und
+Umlaut-Ablehnung, Hash-Werte d9 und 11, Hex→Base64-Schlüssel, Senden und Empfangen, Kanäle im Backup.
+**Nicht verifiziert:** Interoperabilität über Funk mit einer echten App. Das ist der erste Test, wenn
+die Hardware da ist: Nachricht in `#test` aus der App → im Gateway sichtbar und umgekehrt.

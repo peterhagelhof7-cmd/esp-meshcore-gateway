@@ -70,6 +70,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <nav>
 <a href="#status" data-v="status">Status</a>
 <a href="#console" data-v="console">Konsole</a>
+<a href="#channels" data-v="channels">Kanäle</a>
 <a href="#packets" data-v="packets">Pakete</a>
 <a href="#settings" data-v="settings">Einstellungen</a>
 <a href="#wifi" data-v="wifi">WLAN</a>
@@ -155,6 +156,37 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 </section>
 </div>
 
+<div class="view" id="v_channels">
+<section style="margin-bottom:16px">
+<h2>Nachrichten</h2>
+<div class="term" id="msgOut" style="height:40vh"></div>
+<form class="cli" id="msgForm" autocomplete="off">
+<select id="msgCh" style="width:auto;max-width:40%"></select>
+<input id="msgText" maxlength="160" placeholder="Nachricht" spellcheck="true">
+<button type="submit">Senden</button>
+</form>
+<p class="hint" id="msgHint">Kanalnachrichten sind Floods und kosten Airtime im ganzen Netz. Nicht zum Testen in Public schreiben.</p>
+</section>
+
+<section>
+<h2>Kanäle</h2>
+<div class="tbl"><table><thead><tr><th>Name</th><th>Art</th><th>Scope</th><th>Hash</th><th>Schlüssel</th><th></th></tr></thead><tbody id="chBody"></tbody></table></div>
+<p class="hint" id="chEmpty" hidden>Noch keine Kanäle angelegt.</p>
+<div class="form" style="margin-top:14px">
+<div class="grp">Kanal hinzufügen</div>
+<label for="chKind">Art</label>
+<div class="fld"><select id="chKind"><option value="hashtag">Hashtag (#name, Schlüssel aus dem Namen)</option><option value="private">Privat (eigener Schlüssel)</option><option value="public">Public (öffentlicher Standardkanal)</option></select></div>
+<label for="chName">Name</label>
+<div class="fld"><input id="chName" maxlength="31" spellcheck="false" placeholder="#test"><small id="chNameHint">Hashtag-Kanäle: klein, ohne Umlaute und Leerzeichen. Groß-/Kleinschreibung ergibt sonst einen anderen Kanal.</small></div>
+<label for="chKey" id="chKeyLab">Schlüssel</label>
+<div class="fld" id="chKeyBox"><input id="chKey" maxlength="44" spellcheck="false" placeholder="leer = neuen Zufallsschlüssel erzeugen"><small>16 Byte als Base64 (wie in der App) oder 32 Hex-Zeichen</small></div>
+<label for="chScope">Scope (Region)</label>
+<div class="fld"><input id="chScope" maxlength="30" spellcheck="false" placeholder="leer = ohne Scope"><small>Mit Scope leiten nur Repeater weiter, die diese Region kennen (bis flood.max Hops). Ohne Scope gilt flood.max.unscoped.</small></div>
+</div>
+<div class="row"><button type="button" id="chAdd">Hinzufügen</button><span class="msg" id="chMsg" style="margin:0"></span></div>
+</section>
+</div>
+
 <div class="view" id="v_settings">
 <div class="banner" id="rebootBanner"><span>Funkparameter oder Schlüssel geändert. Wirksam erst nach einem Neustart.</span><button type="button" id="bannerReboot">Jetzt neu starten</button></div>
 
@@ -220,7 +252,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <input type="file" id="bkFile" accept=".json,application/json">
 <div class="row"><button type="button" id="bkRestore" disabled>Wiederherstellen</button><span class="msg" id="bkMsg" style="margin:0"></span></div>
 <pre class="out" id="bkOut" hidden></pre>
-<p class="hint">Das Backup ist eine Liste offizieller CLI-Befehle (Einstellungen + Regionen). Nicht enthalten: Admin-Passwort (per CLI nicht auslesbar), WLAN-Zugangsdaten. Mit Schlüssel ist die Datei geheim zu halten.</p>
+<p class="hint">Das Backup ist eine Liste offizieller CLI-Befehle (Einstellungen + Regionen) plus die Kanäle des Gateways. Nicht enthalten: Admin-Passwort (per CLI nicht auslesbar), WLAN-Zugangsdaten. Mit Schlüssel ist die Datei geheim zu halten.</p>
 </section>
 </div>
 </div>
@@ -262,6 +294,7 @@ function show(v){
   document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.dataset.v===v));
   if(v==='console')setTimeout(()=>$('cliIn').focus(),0);
   if(v==='settings')openSettings();
+  if(v==='channels')loadChannels();
   tick();
 }
 window.onhashchange=()=>show(location.hash.slice(1));
@@ -276,6 +309,7 @@ async function refresh(){
     const n=j.node,ra=j.radio,c=j.stats_core||{},rs=j.stats_radio||{},p=j.stats_packets||{},w=j.wifi;
     document.title=n.name+' – MeshCore Gateway';
     set('title',n.name);
+    if(nodeName!==n.name){nodeName=n.name;updMsgHint()}
     set('n_name',n.name);set('n_role',n.role);set('n_fw',n.firmware+' ('+n.build_date+')');
     set('g_ver',j.gateway.version+' · '+j.gateway.cpu_mhz+' MHz');
     set('n_fwd',n.forwarding?'an':'aus');
@@ -425,6 +459,85 @@ $('wifiForm').onsubmit=async e=>{
   else{$('wifiMsg').textContent=j.error||('Fehler '+r.status);$('wifiMsg').className='msg bad'}
 };
 $('rebootBtn').onclick=async()=>{if(!confirm('Gateway neu starten?'))return;await fetch('/api/reboot',{method:'POST'});$('wifiMsg').textContent='Neustart …';$('wifiMsg').className='msg warn'};
+
+/* ---------- Kanäle ---------- */
+let channels=[],nodeName='';
+const KIND={public:'Public',hashtag:'Hashtag',private:'Privat'};
+async function postForm(url,obj){
+  const r=await fetch(url,{method:'POST',body:new URLSearchParams(obj)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.error||('Fehler '+r.status));
+  return j;
+}
+async function loadChannels(){
+  try{
+    const j=await (await fetch('/api/channels',{cache:'no-store'})).json();
+    channels=j.channels;
+    const tb=$('chBody');tb.innerHTML='';
+    channels.forEach(c=>{
+      const tr=document.createElement('tr');
+      const td=(t,cls)=>{const e=document.createElement('td');if(cls)e.className=cls;if(t!==undefined)e.textContent=t;tr.appendChild(e);return e};
+      td(c.name);td(KIND[c.kind]);
+      const sc=td();const si=document.createElement('input');si.value=c.scope;si.placeholder='–';si.style.minWidth='90px';
+      si.onchange=async()=>{try{await postForm('/api/channels',{action:'scope',idx:c.idx,scope:si.value.trim()});$('chMsg').textContent='Scope gespeichert';$('chMsg').className='msg ok'}
+        catch(e){$('chMsg').textContent=e.message;$('chMsg').className='msg bad';si.value=c.scope}};
+      sc.appendChild(si);
+      td(c.hash,'mono');
+      const k=td('','mono');
+      if(c.kind==='private'){const b=document.createElement('button');b.type='button';b.className='chip';b.textContent='anzeigen';
+        b.onclick=()=>{k.textContent=c.key_b64;k.title=c.key_hex};k.appendChild(b)}
+      else k.textContent=c.kind==='public'?'öffentlich':'aus Name';
+      const d=td();const db=document.createElement('button');db.type='button';db.className='chip';db.textContent='löschen';
+      db.onclick=async()=>{if(!confirm('Kanal '+c.name+' löschen? Regeln, die ihn nutzen, senden dann nicht mehr.'))return;
+        try{await postForm('/api/channels',{action:'delete',idx:c.idx});loadChannels()}catch(e){$('chMsg').textContent=e.message;$('chMsg').className='msg bad'}};
+      d.appendChild(db);tb.appendChild(tr);
+    });
+    $('chEmpty').hidden=channels.length>0;
+    const sel=$('msgCh'),old=sel.value;sel.innerHTML='';
+    channels.forEach(c=>{const o=document.createElement('option');o.value=c.idx;o.textContent=c.name;sel.appendChild(o)});
+    if(channels.some(c=>String(c.idx)===old))sel.value=old;
+    $('msgForm').querySelectorAll('input,button,select').forEach(e=>e.disabled=channels.length===0);
+    updMsgHint();
+    if(typeof fillRuleChannels==='function')fillRuleChannels();
+  }catch(e){$('chMsg').textContent='Laden fehlgeschlagen';$('chMsg').className='msg bad'}
+}
+function updKind(){
+  const k=$('chKind').value;
+  $('chKeyBox').style.display=$('chKeyLab').style.display=k==='private'?'':'none';
+  $('chName').placeholder=k==='hashtag'?'#test':(k==='public'?'Public':'Name');
+  $('chNameHint').style.display=k==='hashtag'?'':'none';
+}
+$('chKind').onchange=updKind;updKind();
+$('chAdd').onclick=async()=>{
+  try{
+    await postForm('/api/channels',{action:'add',kind:$('chKind').value,name:$('chName').value.trim(),key:$('chKey').value.trim(),scope:$('chScope').value.trim()});
+    $('chName').value=$('chKey').value=$('chScope').value='';
+    $('chMsg').textContent='Kanal angelegt';$('chMsg').className='msg ok';loadChannels();
+  }catch(e){$('chMsg').textContent=e.message;$('chMsg').className='msg bad'}
+};
+function updMsgHint(){
+  const max=160-(nodeName.length+2);
+  $('msgText').maxLength=Math.max(1,max);
+  const c=channels.find(x=>String(x.idx)===$('msgCh').value);
+  $('msgHint').textContent='Max. '+max+' Zeichen (Absender „'+nodeName+': “ zählt mit). '+
+    (c&&c.scope?'Scope: '+c.scope+'. ':'Ohne Scope. ')+'Kanalnachrichten sind Floods und kosten Airtime im ganzen Netz.';
+}
+$('msgCh').onchange=updMsgHint;
+const msgs=makeFeed('/api/messages',$('msgOut'),500,()=>true);
+const msgAdd=msgs.add;
+msgs.add=(cls,text,ts)=>{
+  if(cls!=='M'&&cls!=='S')return msgAdd(cls,text,ts);
+  const p=text.split('\t');   // idx, Kanal, SNR, Hops, Text
+  const extra=cls==='M'?'  ('+p[3]+' Hops, SNR '+p[2]+' dB)':'  (gesendet)';
+  return msgAdd(cls==='M'?'R':'T',p[1]+'  '+p.slice(4).join(' ')+extra,ts);
+};
+$('msgForm').onsubmit=async e=>{
+  e.preventDefault();
+  const t=$('msgText').value.trim();if(!t)return;
+  try{await postForm('/api/channels/send',{idx:$('msgCh').value,text:t});$('msgText').value='';
+    for(const d of [300,900,2000])setTimeout(msgs.poll,d)}
+  catch(err){msgs.add('F','Senden fehlgeschlagen: '+err.message)}
+};
 
 /* ---------- CLI-Aufträge (Batch) ---------- */
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -693,8 +806,10 @@ $('bkDown').onclick=async()=>{
     cmds.push(...regionCmds(rep[FK.length].reply));
     if(withKey){const k=val(rep[FK.length+1].reply);if(/^[0-9a-fA-F]{64,}$/.test(k))cmds.push('set prv.key '+k)}
     const st=await (await fetch('/api/status',{cache:'no-store'})).json();
+    const chs=(await (await fetch('/api/channels',{cache:'no-store'})).json()).channels
+      .map(c=>({kind:c.kind,name:c.name,key:c.kind==='private'?c.key_b64:'',scope:c.scope}));
     const file={format:'meshcore-gateway-backup',version:1,created:new Date().toISOString(),
-      node:st.node.name,pubkey:st.node.pubkey,meshcore:st.node.firmware,gateway:st.gateway.version,commands:cmds};
+      node:st.node.name,pubkey:st.node.pubkey,meshcore:st.node.firmware,gateway:st.gateway.version,commands:cmds,channels:chs};
     const a=document.createElement('a');
     a.href=URL.createObjectURL(new Blob([JSON.stringify(file,null,2)],{type:'application/json'}));
     a.download='meshcore-gw-'+st.node.name.replace(/[^A-Za-z0-9_-]+/g,'_')+'-'+file.created.slice(0,10)+'.json';
@@ -702,7 +817,7 @@ $('bkDown').onclick=async()=>{
     $('bkMsg').textContent=cmds.length+' Befehle gesichert'+(withKey?' (mit Schlüssel!)':'');$('bkMsg').className='msg ok';
   }catch(e){$('bkMsg').textContent='Backup fehlgeschlagen: '+e.message;$('bkMsg').className='msg bad'}
 };
-let bkCmds=null;
+let bkCmds=null,bkChannels=[];
 $('bkFile').onchange=async e=>{
   bkCmds=null;$('bkRestore').disabled=true;$('bkOut').hidden=true;
   const f=e.target.files[0];if(!f)return;
@@ -712,9 +827,10 @@ $('bkFile').onchange=async e=>{
     const allowed=/^(set [a-z.]+ |region (put|denyf|home|save)\b)/;
     const bad=j.commands.filter(c=>typeof c!=='string'||!allowed.test(c));
     if(bad.length)throw new Error('unerwartete Befehle: '+bad.slice(0,3).join(', '));
-    bkCmds=j.commands;
+    bkCmds=j.commands;bkChannels=Array.isArray(j.channels)?j.channels:[];
     $('bkOut').hidden=false;
-    $('bkOut').textContent='Backup von '+j.node+' ('+j.created+')\n\n'+bkCmds.map(c=>c.startsWith('set prv.key ')?'set prv.key ••••••••':c).join('\n');
+    $('bkOut').textContent='Backup von '+j.node+' ('+j.created+')\n\n'+bkCmds.map(c=>c.startsWith('set prv.key ')?'set prv.key ••••••••':c).join('\n')+
+      (bkChannels.length?'\n\nKanäle: '+bkChannels.map(c=>c.name+(c.scope?' ['+c.scope+']':'')).join(', '):'');
     $('bkRestore').disabled=false;$('bkMsg').textContent=bkCmds.length+' Befehle bereit';$('bkMsg').className='msg';
   }catch(err){$('bkMsg').textContent='Datei ungültig: '+err.message;$('bkMsg').className='msg bad'}
 };
@@ -727,7 +843,12 @@ $('bkRestore').onclick=async()=>{
     const rep=await runJob(bkCmds,false);
     showResults($('bkOut'),rep.map(r=>r.cmd.startsWith('set prv.key ')?{cmd:'set prv.key ••••••••',reply:r.reply.replace(/[0-9a-f]{64}/i,'…')}:r));
     flagReboot(bkCmds);
-    const bad=rep.filter(r=>isErr(r.reply)).length;
+    let bad=rep.filter(r=>isErr(r.reply)).length;
+    for(const c of bkChannels){   // vorhandene Kanäle (gleicher Schlüssel) werden übersprungen
+      try{await postForm('/api/channels',{action:'add',kind:c.kind,name:c.name,key:c.key||'',scope:c.scope||''})}
+      catch(e){if(!/existiert schon/.test(e.message))bad++}
+    }
+    loadChannels();
     $('bkMsg').textContent=bad?bad+' Befehl(e) abgelehnt':'Eingespielt';$('bkMsg').className='msg '+(bad?'bad':'ok');
     loadSettings();loadProfile();loadRegions();
   }catch(e){$('bkMsg').textContent='Fehler: '+e.message;$('bkMsg').className='msg bad'}
@@ -749,6 +870,7 @@ function tick(){
   if(now-lastStatus>=5000){lastStatus=now;refresh()}
   if(view==='console')con.poll();
   if(view==='packets')pkt.poll();
+  if(view==='channels')msgs.poll();
 }
 setInterval(tick,1000);
 show(location.hash.slice(1)||'status');

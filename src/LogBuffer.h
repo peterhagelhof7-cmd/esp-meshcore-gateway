@@ -7,13 +7,14 @@
 // "since"-Sequenz nur neue Zeilen abholt (docs/entscheidungen.md E10).
 class LogBuffer {
 public:
-  static const size_t LINE_LEN = 200;
+  static const size_t LINE_LEN = 256;
 
   struct Line {
     uint32_t seq;
     uint32_t uptimeMs;
     uint32_t epoch;     // RTC-Zeit des Knotens (vor NTP-Sync ggf. falsch)
-    char type;          // c=Befehl, r=Antwort, s=System, R=RX, T=TX, F=TX-Fehler
+    char type;          // c=Befehl, r=Antwort, s=System, R=RX, T=TX, F=TX-Fehler,
+                        // M=Kanal empfangen, S=Kanal gesendet
     char text[LINE_LEN];
   };
 
@@ -40,3 +41,4 @@ private:
 
 extern LogBuffer console_log;   // CLI-Befehle, Antworten, Systemmeldungen
 extern LogBuffer packet_log;    // RX/TX-Pakete
+extern LogBuffer channel_log;   // Kanalnachrichten: M=empfangen, S=gesendet

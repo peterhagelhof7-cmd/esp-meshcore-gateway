@@ -77,6 +77,57 @@ async function runCli(page, cmd) {
   check('Pakete: nur TX', txOnly.length > 0 && txOnly.every(t => t.includes('TX ')));
   await page.screenshot({ path: out + '/03_packets.png' });
 
+  // ---------- Kanäle ----------
+  {
+    const t = async sel => page.$eval(sel, e => e.textContent);
+    const until = async (fn, ms = 6000) => { const s = Date.now(); while (Date.now() - s < ms) { if (await fn()) return true; await sleep(150); } return false; };
+    await page.click('nav a[data-v=channels]');
+    check('Kanäle: leer + Senden gesperrt', await until(async () => !(await page.$eval('#chEmpty', e => e.hidden)) && await page.$eval('#msgText', e => e.disabled)));
+    // Hashtag mit Großbuchstaben -> wird klein + # vorangestellt
+    await page.select('#chKind', 'hashtag');
+    await page.type('#chName', 'Test');
+    await page.click('#chAdd');
+    check('Kanäle: #test angelegt', await until(async () => (await page.$$eval('#chBody tr td:first-child', d => d.map(x => x.textContent))).includes('#test')));
+    const testHash = await page.$$eval('#chBody tr', rows => rows.map(r => [...r.children].map(c => c.textContent)).find(r => r[0] === '#test')[3]);
+    check('Kanäle: #test Hash d9 (= sha256-Ableitung)', testHash === 'd9', testHash);
+    // Duplikat abgelehnt
+    await page.type('#chName', '#test');
+    await page.click('#chAdd');
+    check('Kanäle: Duplikat abgelehnt', await until(async () => (await t('#chMsg')).includes('existiert schon')), await t('#chMsg'));
+    await page.$eval('#chName', e => e.value = '');
+    // Ungültiger Hashtag
+    await page.type('#chName', '#Grüße');
+    await page.click('#chAdd');
+    check('Kanäle: Umlaut im Hashtag abgelehnt', await until(async () => (await t('#chMsg')).includes('nur a-z')), await t('#chMsg'));
+    await page.$eval('#chName', e => e.value = '');
+    // Privat mit Hex-Schlüssel + Scope
+    await page.select('#chKind', 'private');
+    check('Kanäle: Schlüsselfeld nur bei privat', await page.$eval('#chKeyBox', e => e.style.display !== 'none'));
+    await page.type('#chName', 'sensormeter');
+    await page.type('#chKey', '00112233445566778899aabbccddeeff');
+    await page.type('#chScope', 'rhein-main');
+    await page.click('#chAdd');
+    check('Kanäle: privat angelegt', await until(async () => (await page.$$eval('#chBody tr', r => r.length)) === 2));
+    // Public
+    await page.select('#chKind', 'public');
+    await page.click('#chAdd');
+    await until(async () => (await page.$$eval('#chBody tr', r => r.length)) === 3);
+    const pubHash = await page.$$eval('#chBody tr', rows => rows.map(r => [...r.children].map(c => c.textContent)).find(r => r[0] === 'Public')[3]);
+    check('Kanäle: Public Hash 11', pubHash === '11', pubHash);
+    // Schlüssel des privaten Kanals anzeigen
+    await page.$$eval('#chBody tr', rows => rows.find(r => r.children[0].textContent === 'sensormeter').querySelector('button.chip').click());
+    const keyShown = await page.$$eval('#chBody tr', rows => rows.find(r => r.children[0].textContent === 'sensormeter').children[4].textContent);
+    check('Kanäle: Schlüssel als Base64', keyShown === 'ABEiM0RVZneImaq7zN3u/w==', keyShown);
+    // Nachricht senden + Empfang
+    await page.select('#msgCh', '1');
+    check('Kanäle: Hinweis nennt Scope', (await t('#msgHint')).includes('rhein-main'), await t('#msgHint'));
+    await page.type('#msgText', 'Hallo vom Gateway');
+    await page.keyboard.press('Enter');
+    check('Kanäle: gesendete Nachricht sichtbar', await until(async () => (await t('#msgOut')).includes('sensormeter  Heltec Repeater: Hallo vom Gateway')), (await t('#msgOut')).slice(-200));
+    check('Kanäle: empfangene Nachricht mit SNR/Hops', await until(async () => /#test  Funker\d: Hallo Nr\. \d+  \(2 Hops, SNR 6\.5 dB\)/.test(await t('#msgOut'))));
+    await page.screenshot({ path: out + '/08_channels.png', fullPage: true });
+  }
+
   // ---------- Einstellungen ----------
   const fs = require('fs'), path = require('path');
   const dl = path.resolve(out, 'downloads');
@@ -129,6 +180,7 @@ async function runCli(page, cmd) {
   check('Backup: Inhalt', bk.commands.includes('set tx 17') && bk.commands.includes('set radio 869.618,62.5,8,8') &&
         bk.commands.includes('region put rhein-main') && bk.commands.some(c => c.startsWith('set prv.key ')), bk.commands.length + ' Befehle');
   check('Backup: unsupported fem.txgain ausgelassen', !bk.commands.some(c => c.includes('fem.txgain')));
+  check('Backup: Kanäle enthalten', Array.isArray(bk.channels) && bk.channels.length === 3 && bk.channels.some(c => c.name === 'sensormeter' && c.key === 'ABEiM0RVZneImaq7zN3u/w==' && c.scope === 'rhein-main'), JSON.stringify(bk.channels));
 
   // Zustand verstellen, dann Backup einspielen
   await runCli(page, 'set tx 5');
