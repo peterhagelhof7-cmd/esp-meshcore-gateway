@@ -73,7 +73,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <a href="#channels" data-v="channels">Kanäle</a>
 <a href="#packets" data-v="packets">Pakete</a>
 <a href="#settings" data-v="settings">Einstellungen</a>
-<a href="#wifi" data-v="wifi">WLAN</a>
+<a href="#wifi" data-v="wifi">System</a>
 </nav>
 
 <div class="view" id="v_status"><div class="grid">
@@ -277,6 +277,26 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <div class="msg" id="wifiMsg"></div>
 </form>
 </section>
+
+<section style="margin-top:16px">
+<h2>Firmware-Update</h2>
+<dl>
+<dt>Version</dt><dd id="fw_ver">–</dd>
+<dt>Board</dt><dd id="fw_proj" class="mono">–</dd>
+<dt>Partition</dt><dd id="fw_part">–</dd>
+</dl>
+<form id="otaForm">
+<label class="chk" style="margin-top:12px"><input type="checkbox" id="otaForce"> Downgrade erzwingen (ältere Version zulassen)</label>
+<label for="otaFile">Firmware-Datei (firmware.bin dieses Boards)</label>
+<input type="file" id="otaFile" accept=".bin,application/octet-stream">
+<div class="row">
+<button type="submit" id="otaBtn" disabled>Hochladen &amp; installieren</button>
+<progress id="otaProg" max="100" value="0" hidden style="flex:1;min-width:120px"></progress>
+<span class="msg" id="otaMsg" style="margin:0"></span>
+</div>
+</form>
+<p class="hint">Nur Dateien mit passendem Gateway-Merkmal werden angenommen (gleiches Board, keine ältere Version). Die neue Firmware muss 60 s stabil laufen, sonst startet automatisch wieder die vorherige.</p>
+</section>
 </div>
 
 <script>
@@ -330,6 +350,8 @@ async function refresh(){
     set('w_mode',modes[w.mode]||w.mode);set('w_ssid',w.ssid);set('w_ip',w.ip);
     set('w_rssi',w.rssi?w.rssi+' dBm':null);set('w_host',w.hostname);set('w_mac',w.mac);
     set('g_heap',Math.round(j.gateway.free_heap/1024)+' KB');
+    set('fw_ver',j.gateway.version+' (MeshCore '+n.firmware+')');set('fw_proj',j.gateway.project);
+    set('fw_part',j.gateway.partition+' · '+j.gateway.image_state);
     $('wifiPill').textContent=(modes[w.mode]||w.mode)+' · '+w.ip;
     if(!hostTouched&&!$('hostname').value)$('hostname').value=w.hostname;
   }catch(e){$('wifiPill').textContent='keine Verbindung'}
@@ -459,6 +481,29 @@ $('wifiForm').onsubmit=async e=>{
   else{$('wifiMsg').textContent=j.error||('Fehler '+r.status);$('wifiMsg').className='msg bad'}
 };
 $('rebootBtn').onclick=async()=>{if(!confirm('Gateway neu starten?'))return;await fetch('/api/reboot',{method:'POST'});$('wifiMsg').textContent='Neustart …';$('wifiMsg').className='msg warn'};
+
+/* ---------- Firmware-Update ---------- */
+$('otaFile').onchange=()=>{$('otaBtn').disabled=!$('otaFile').files.length;$('otaMsg').textContent=''};
+$('otaForm').onsubmit=e=>{
+  e.preventDefault();
+  const f=$('otaFile').files[0];if(!f)return;
+  if(!confirm('Firmware '+f.name+' ('+Math.round(f.size/1024)+' KB) installieren? Das Gateway startet danach neu.'))return;
+  const fd=new FormData();
+  if($('otaForce').checked)fd.append('force','1');   // VOR der Datei (Multipart-Reihenfolge)
+  fd.append('firmware',f,f.name);
+  const x=new XMLHttpRequest();
+  $('otaBtn').disabled=true;$('otaProg').hidden=false;$('otaProg').value=0;
+  $('otaMsg').textContent='Lade hoch …';$('otaMsg').className='msg';
+  x.upload.onprogress=ev=>{if(ev.lengthComputable)$('otaProg').value=Math.round(ev.loaded*100/ev.total)};
+  x.onload=()=>{
+    let j={};try{j=JSON.parse(x.responseText)}catch(err){}
+    if(x.status===200){$('otaProg').value=100;$('otaMsg').textContent='Installiert ('+j.version+'). Neustart … Seite lädt in 25 s neu.';$('otaMsg').className='msg ok';
+      setTimeout(()=>location.reload(),25000)}
+    else{$('otaMsg').textContent='Abgelehnt: '+(j.error||('Fehler '+x.status));$('otaMsg').className='msg bad';$('otaBtn').disabled=false;$('otaProg').hidden=true}
+  };
+  x.onerror=()=>{$('otaMsg').textContent='Verbindung abgebrochen';$('otaMsg').className='msg bad';$('otaBtn').disabled=false};
+  x.open('POST','/api/ota');x.send(fd);
+};
 
 /* ---------- Kanäle ---------- */
 let channels=[],nodeName='';

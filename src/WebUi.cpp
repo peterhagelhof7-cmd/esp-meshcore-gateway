@@ -13,6 +13,7 @@
 #include "LogBuffer.h"
 #include "MeshActions.h"
 #include "NetworkManager.h"
+#include "OtaUpdate.h"
 #include "Profile.h"
 #include "web/index_html.h"
 
@@ -79,6 +80,13 @@ static void handleStatus(AsyncWebServerRequest* req) {
   j += String(ESP.getFreeHeap());
   j += ",\"cpu_mhz\":";
   j += String(getCpuFrequencyMhz());
+  j += ",\"project\":\"";
+  j += ota_update::projectId();
+  j += "\",\"partition\":\"";
+  j += ota_update::runningPartition();
+  j += "\",\"image_state\":\"";
+  j += jsonEscape(ota_update::imageState());
+  j += "\"";
   j += "},\"node\":{\"name\":\"";
   j += jsonEscape(s.nodeName);
   j += "\",\"pubkey\":\"";
@@ -395,6 +403,24 @@ static void handleChannelSend(AsyncWebServerRequest* req) {
   req->send(200, "application/json", "{\"ok\":true}");
 }
 
+// ---------- M5: Firmware-Update ----------
+
+// Der Upload-Callback läuft VOR dem Request-Handler. Ohne eigene Prüfung
+// könnte ein nicht angemeldeter Client in die OTA-Partition schreiben (E19).
+static void handleOtaUpload(AsyncWebServerRequest* req, const String& filename, size_t index,
+                            uint8_t* data, size_t len, bool final) {
+  MeshSnapshot s = gateway_status::get();
+  if (!s.valid || !req->authenticate(WEB_USER, s.adminPassword)) return;
+  ota_update::onUpload(req, filename, index, data, len, final);
+}
+
+static void handleOtaDone(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  if (ota_update::onRequestDone(req)) {
+    s_rebootAt = millis() + 2000;   // Antwort noch rausschicken
+  }
+}
+
 static void handleReboot(AsyncWebServerRequest* req) {
   if (!checkAuth(req)) return;
   req->send(200, "application/json", "{\"ok\":true}");
@@ -418,6 +444,7 @@ void web_ui::begin() {
   server.on(AsyncURIMatcher::exact("/api/cli/batch"), HTTP_POST, handleCliBatch);
   server.on(AsyncURIMatcher::exact("/api/cli/job"), HTTP_GET, handleCliJob);
   server.on(AsyncURIMatcher::exact("/api/profile"), HTTP_GET, handleProfile);
+  server.on(AsyncURIMatcher::exact("/api/ota"), HTTP_POST, handleOtaDone, handleOtaUpload);
   server.on(AsyncURIMatcher::exact("/api/channels"), HTTP_GET, handleChannelsGet);
   server.on(AsyncURIMatcher::exact("/api/channels"), HTTP_POST, handleChannelsPost);
   server.on(AsyncURIMatcher::exact("/api/channels/send"), HTTP_POST, handleChannelSend);

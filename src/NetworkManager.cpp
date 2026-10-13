@@ -135,10 +135,11 @@ void NetworkManager::loop() {
 
   if (_gotIp) {
     if (!_sntpStarted) {
-      // UTC, wie MeshCore intern rechnet. SNTP synchronisiert danach selbstständig
-      // weiter (Standard-Intervall 1 h), jede Synchronisation meldet onTimeSync.
+      // Systemzeit (Epoch) ist immer UTC, so rechnet MeshCore. Die TZ-Regel
+      // betrifft nur localtime() fürs OLED. SNTP synchronisiert danach selbst
+      // weiter (Standard 1 h), jede Synchronisation meldet onTimeSync.
       sntp_set_time_sync_notification_cb(onTimeSync);
-      configTime(0, 0, "pool.ntp.org", "time.cloudflare.com");
+      configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org", "time.cloudflare.com");
       _sntpStarted = true;
       Serial.println("[NET] NTP gestartet");
     }

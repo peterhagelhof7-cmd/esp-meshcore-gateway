@@ -217,6 +217,45 @@ async function runCli(page, cmd) {
   check('Mobil: Einstellungen ohne horizontales Scrollen', !overflow2);
   await page.screenshot({ path: out + '/07_settings_mobile.png', fullPage: true });
 
+  // ---------- Firmware-Update (System) ----------
+  {
+    await page.setViewport({ width: 1200, height: 900 });
+    const t = async sel => page.$eval(sel, e => e.textContent);
+    const until = async (fn, ms = 8000) => { const s = Date.now(); while (Date.now() - s < ms) { if (await fn()) return true; await sleep(150); } return false; };
+    const root = path.resolve(__dirname, '..', '..');
+    const binV4 = path.join(root, '.pio/build/gateway_heltec_v4/firmware.bin');
+    const binR8 = path.join(root, '.pio/build/gateway_heltec_v4_r8/firmware.bin');
+    const txt = path.join(dl, 'keine-firmware.txt');
+    fs.writeFileSync(txt, 'Hallo, ich bin keine Firmware');
+    const old = path.join(dl, 'alt.bin');
+    fs.writeFileSync(old, Buffer.concat([Buffer.alloc(5000), Buffer.from('MCGW-FW-ID:MESHCORE-GW-HELTEC-V4:0.0.1:MCGW-FW-END'), Buffer.alloc(5000)]));
+
+    await page.click('nav a[data-v=wifi]');
+    check('OTA: Board angezeigt', await until(async () => (await t('#fw_proj')) === 'MESHCORE-GW-HELTEC-V4'), await t('#fw_proj'));
+    const upload = async (file, force) => {
+      await page.$eval('#otaForce', (e, f) => { e.checked = f; }, force);
+      const inp = await page.$('#otaFile');
+      await inp.uploadFile(file);
+      await page.$eval('#otaFile', e => e.dispatchEvent(new Event('change')));
+      await page.click('#otaBtn');
+      await until(async () => /Abgelehnt|Installiert/.test(await t('#otaMsg')), 20000);
+      return t('#otaMsg');
+    };
+    let m = await upload(txt, false);
+    check('OTA: Textdatei abgelehnt', m.includes('kein Gateway-Firmware-Merkmal'), m);
+    m = await upload(binR8, false);
+    check('OTA: R8-Firmware auf V4 abgelehnt', m.includes('falsche Firmware: MESHCORE-GW-HELTEC-V4-R8'), m);
+    m = await upload(old, false);
+    check('OTA: Downgrade abgelehnt', m.includes('Downgrade') && m.includes('0.0.1'), m);
+    m = await upload(old, true);
+    check('OTA: Downgrade mit Erzwingen', m.includes('Installiert (0.0.1)'), m);
+    await page.reload({ waitUntil: 'networkidle0' });   // Reload-Timer der Seite verwerfen
+    await page.click('nav a[data-v=wifi]');
+    m = await upload(binV4, false);
+    check('OTA: echte V4-Firmware (gleiche Version) angenommen', /Installiert \(\d+\.\d+\.\d+\)/.test(m), m);
+    await page.screenshot({ path: out + '/09_system_ota.png', fullPage: true });
+  }
+
   check('Keine JS-Fehler', errors.length === 0, errors.join(' | '));
   await browser.close();
   console.log(fails ? `${fails} FEHLER` : 'ALLE TESTS OK');

@@ -241,6 +241,37 @@ class FakeChannels:
 
 chans = FakeChannels()
 
+# OTA wie src/OtaUpdate.cpp: Projekt-ID + Version aus platformio.ini (V4-Env)
+_ini = open(os.path.join(ROOT, '..', 'platformio.ini'), encoding='utf-8').read()
+GW_VERSION = re.search(r"GATEWAY_VERSION='\"([^\"]+)\"'", _ini).group(1)
+GW_PROJECT = re.search(r"GATEWAY_PROJECT_ID='\"([^\"]+)\"'", _ini).group(1)   # erstes = V4
+MARKER = re.compile(rb'MCGW-FW-ID:([A-Za-z0-9._+\-]+):([A-Za-z0-9._+\-]+):MCGW-FW-END')
+
+
+def ver_tuple(v):
+    m = re.match(r'v?(\d+)\.(\d+)\.(\d+)(?:-rc(\d+))?', v)
+    if not m: return (0, 0, 0, -1)
+    a, b, c, rc = m.groups()
+    return (int(a), int(b), int(c), 10**9 if rc is None else int(rc))
+
+
+def mock_ota(body, ctype):
+    boundary = ctype.split('boundary=')[1].encode()
+    force, data = False, None
+    for part in body.split(b'--' + boundary):
+        head, _, content = part.partition(b'\r\n\r\n')
+        content = content[:-2] if content.endswith(b'\r\n') else content
+        if b'name="force"' in head: force = content.strip() == b'1'
+        if b'name="firmware"' in head: data = content
+    if data is None: return 400, {'error': 'keine Datei empfangen'}
+    m = MARKER.search(data)
+    if not m: return 400, {'error': 'kein Gateway-Firmware-Merkmal gefunden (falsche Datei?)'}
+    pid, ver = m.group(1).decode(), m.group(2).decode()
+    if pid != GW_PROJECT: return 400, {'error': 'falsche Firmware: %s, dieses Gerät ist %s' % (pid, GW_PROJECT)}
+    if ver_tuple(ver) < ver_tuple(GW_VERSION) and not force:
+        return 400, {'error': 'Downgrade %s -> %s abgelehnt ("Downgrade erzwingen" setzen)' % (GW_VERSION, ver)}
+    return 200, {'ok': True, 'version': ver, 'bytes': len(data)}
+
 cli = FakeCli()
 PROFILE = load_profile()
 jobs = {}
@@ -296,7 +327,8 @@ class H(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b); return
         if u.path == '/api/status':
             p = cli.p
-            return self.send_json({'gateway': {'version': '0.2.0', 'uptime_ms': 1000, 'free_heap': 180000, 'cpu_mhz': 240},
+            return self.send_json({'gateway': {'version': GW_VERSION, 'uptime_ms': 1000, 'free_heap': 180000, 'cpu_mhz': 240,
+                                   'project': GW_PROJECT, 'partition': 'app0', 'image_state': 'gültig'},
               'node': {'name': p['name'], 'pubkey': 'ab' * 32, 'role': 'repeater', 'firmware': 'v1.17.1', 'build_date': '14 Aug 2026',
                        'lat': p['lat'], 'lon': p['lon'], 'forwarding': p['repeat'] == 'on'},
               'radio': {'freq': p['freq'], 'bw': p['bw'], 'sf': p['sf'], 'cr': p['cr'], 'tx_power': p['tx']},
@@ -329,7 +361,11 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
-        body = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
+        raw = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        if u.path == '/api/ota':
+            code, obj = mock_ota(raw, self.headers.get('Content-Type', ''))
+            return self.send_json(obj, code)
+        body = raw.decode()
         form = parse_qs(body, keep_blank_values=True)
         if u.path == '/api/cli':
             return self.send_json({'ok': True, 'id': submit([form.get('cmd', [''])[0]], False)})

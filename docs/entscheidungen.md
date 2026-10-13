@@ -239,3 +239,53 @@ Das Weiterleiten fremder Kanalpakete bleibt unverändert Sache des Repeaters.
 Umlaut-Ablehnung, Hash-Werte d9 und 11, Hex→Base64-Schlüssel, Senden und Empfangen, Kanäle im Backup.
 **Nicht verifiziert:** Interoperabilität über Funk mit einer echten App. Das ist der erste Test, wenn
 die Hardware da ist: Nachricht in `#test` aus der App → im Gateway sichtbar und umgekehrt.
+
+## E19 – M5: Firmware-Update per Web mit Merkmal, Downgrade-Schutz und Rollback (2026-10-14)
+Die Pflichtanforderung aus der Sensormeter-Familie gilt auch hier: OTA nimmt nur Firmware desselben
+Projekts an, ältere Versionen nur mit „Downgrade erzwingen“.
+- **Merkmal** im Binary: `MCGW-FW-ID:<PROJEKT-ID>:<VERSION>:MCGW-FW-END`. Die Projekt-ID ist **pro Board**
+  verschieden (`MESHCORE-GW-HELTEC-V4` bzw. `…-V4-R8`), weil V4 und R8 unterschiedliche Pins haben
+  und eine falsche Firmware die Hardware falsch ansteuern würde.
+- **Scanner** `src/FwMarker.cpp`: Byte-für-Byte-Zustandsautomat ohne Arduino-Abhängigkeit. Er ist
+  NUL-sicher, sicher an Chunkgrenzen und kopiert nichts in gedeckelte Puffer. Damit sind beide
+  Sensormeter-Bugs (strstr an NUL, Chunk-Kappung) konstruktiv ausgeschlossen.
+  **Fund:** Der Suchbegriff `MCGW-FW-ID:` steht als Konstante selbst im Binary, bei der V4 an
+  Offset 11788 und damit vor dem echten Merkmal (14321). Der Automat verwirft diesen Köder, weil
+  danach eine NUL statt gültiger Feldzeichen folgt.
+- **Host-Test** `test/host/fw_marker_test.cpp` (`tools/host-test.ps1`) gegen die **echten**
+  `firmware.bin` beider Boards, mit Chunk-Größen 1 Byte bis zur ganzen Datei. Dazu kommen der Marker über
+  jede Chunkgrenze, Negativfälle (Zufall, Text, Köder, abgeschnitten, ohne Version) und der
+  Versionsvergleich (`a.b.c[-rcN]`, Release > RC): **35/35 PASS je Board**.
+- **Login schon im Upload-Callback:** ESPAsyncWebServer ruft den Upload-Handler *vor* dem
+  Request-Handler auf. Ohne eigene Prüfung könnte ein anonymer Client in die OTA-Partition schreiben.
+- `_tempObject` wird **nicht** als Markierung genutzt (die Lib gibt es im Destruktor mit `free()`
+  frei). Stattdessen wird der Owner-Request gemerkt, bei `onDisconnect` aufgeräumt und ein hängender
+  Upload nach 30 s ohne Daten freigegeben.
+- Das Feld `force` steht im Formular **vor** der Datei (Multipart wird in Reihenfolge geparst).
+- **Rollback:** Der Arduino-Bootloader hat `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`. Mit
+  `verifyRollbackLater() → true` markiert der Core die App nicht sofort als gültig. Das Gateway tut
+  es erst nach **60 s stabiler Laufzeit**. Stürzt die neue Firmware vorher ab, startet der Bootloader
+  die vorherige.
+  ⚠ Ein Stromausfall oder manueller Neustart in diesen 60 s nach einem Update führt ebenfalls zum
+  Rollback (gewollt konservativ).
+- Upstream-`start ota` bleibt deaktiviert (E8).
+- **Nicht HW-verifiziert:** echter OTA-Upload (Update.h, Multipart-`force`) und Rollback. Erster Test
+  auf Hardware: gleiche Version hochladen → Neustart → „Prüflauf“ → nach 60 s „gültig“.
+
+## E20 – M5: Eigene OLED-Anzeige statt Upstream-UITask (2026-10-14)
+**Fund:** Im Upstream-UITask schaltet ein **langer Tastendruck den Knoten ab** (`board.powerOff()`,
+Deep-Sleep ohne Weckquelle). Ohne Akku (E12) wäre das Gateway danach nur per Stromtrennung
+erreichbar, und das schon durch versehentliches Drücken.
+`GatewayUITask` ersetzt deshalb den UITask (das Logo stammt aus dem Upstream, MIT):
+- Startbild 4 s, danach 3 Seiten: **Netz** (Name, WLAN, IP), **Funk** (Frequenz/SF/BW/CR/TX,
+  Rauschpegel), **Mesh** (RX/TX, Weiterleitung, Uhrzeit)
+- Kurzer **und** langer Druck: Anzeige an bzw. nächste Seite. Abschalten geht nur per CLI
+  (`poweroff`, mit Warnung im Web).
+- Auto-Aus nach 60 s (Upstream 20 s) gegen Einbrennen. **Im Installer-AP bleibt sie an** und zeigt
+  „installer / installer, http://192.168.4.1“, damit die Ersteinrichtung ohne Doku klappt.
+- Die Uhrzeit auf dem OLED ist Lokalzeit (`configTzTime` mit CET/CEST-Regel). Die Systemzeit (Epoch)
+  bleibt UTC, so rechnet MeshCore.
+
+## E21 – Tab „WLAN“ heißt jetzt „System“ (2026-10-14)
+Dort liegen WLAN-Einrichtung, Neustart und das Firmware-Update (Version, Board, Partition und
+Abbild-Status wie „Prüflauf“/„gültig“).

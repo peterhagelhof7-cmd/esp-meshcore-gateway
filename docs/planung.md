@@ -121,7 +121,7 @@ Login-Schutz der Weboberfläche ist Pflicht (Konsole kann `erase`, Private-Key-E
 | M2 🟡 | Webkonsole (HTTP-Polling → CLI-Queue, E10) + Live-Paket-Log | Build grün V4 + R8, UI-Test gegen Mock 16/16 (2026-10-13); **HW-Test offen** |
 | M3 🟡 | Komplette MeshCore-Einstellungsseite + hansemesh-Profil (E15) + Backup/Restore + Passwort; NTP vorgezogen (E17) | Build grün V4 + R8, UI-Test gegen Mock 42/42 (2026-10-13); **HW-Test offen** |
 | M4 🟡 | Kanäle: Verwaltung (Public/Hashtag/Privat, Scope) + Senden + Empfang (E18) | Build grün, UI-Test gegen Mock (2026-10-14); **Funk-Test mit App offen** |
-| M5 | OTA (Identität + Downgrade-Check), NTP→Uhr, OLED-Status | OTA-Upload auf HW |
+| M5 🟡 | OTA mit Board-Merkmal + Downgrade-Schutz + Rollback (E19), eigene OLED-Anzeige (E20); NTP schon in M3 | Build grün V4 + R8, Host-Test Merkmal 35/35 je Board, UI-Test (2026-10-14); **HW-Test offen** |
 | M6 | Sensormeter-Poller + Regel-Engine | Grenzwert provozieren → Kanalnachricht |
 
 Nach jedem Meilenstein: echter Build, Entscheidungslog `docs/entscheidungen.md`, Commit.

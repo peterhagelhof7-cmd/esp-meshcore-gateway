@@ -20,6 +20,7 @@
 #include "Profile.h"
 #include "GatewayStatus.h"
 #include "NetworkManager.h"
+#include "OtaUpdate.h"
 #include "WebUi.h"
 
 #if !defined(ESP32)
@@ -34,8 +35,8 @@
 #endif
 
 #ifdef DISPLAY_CLASS
-  #include "UITask.h"
-  static UITask ui_task(board, display);
+  #include "GatewayUITask.h"
+  static GatewayUITask ui_task(board, display);   // statt Upstream-UITask (E20)
 #endif
 
 StdRNG fast_rng;
@@ -126,6 +127,7 @@ void setup() {
   gw_config.begin();
   network.begin();
   web_ui::begin();
+  ota_update::begin();
   console_log.push('s', the_mesh.getRTCClock()->getCurrentTime(), "Gateway gestartet, MeshCore " FIRMWARE_VERSION);
 
   if (first_boot) {
@@ -192,6 +194,7 @@ void loop() {
   }
   network.loop();
   web_ui::loop();
+  ota_update::loop();
   if (network.takeTimeSynced()) {
     // ESP32RTCClock nutzt die Systemzeit, SNTP hat sie schon gestellt. Bei einer
     // externen RTC (AutoDiscoverRTCClock, z. B. DS3231) diese mitziehen.
