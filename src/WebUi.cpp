@@ -4,8 +4,10 @@
 #include <ESPAsyncWebServer.h>
 #include <WiFi.h>
 
+#include "CliBridge.h"
 #include "GatewayConfig.h"
 #include "GatewayStatus.h"
+#include "LogBuffer.h"
 #include "NetworkManager.h"
 #include "web/index_html.h"
 
@@ -178,6 +180,42 @@ static void handleWifiSave(AsyncWebServerRequest* req) {
   s_rebootAt = millis() + 1500;
 }
 
+static void handleCli(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  // Leerer Befehl ist erlaubt: beendet z. B. "region load" (Upstream erwartet
+  // dafür eine Leerzeile).
+  String cmd = req->hasParam("cmd", true) ? req->getParam("cmd", true)->value() : String();
+  cmd.replace("\r", "");
+  cmd.replace("\n", " ");
+  if (cmd.length() > cli_bridge::MAX_CMD_LEN) {
+    req->send(400, "application/json", "{\"error\":\"Befehl zu lang (max. 159 Zeichen)\"}");
+    return;
+  }
+  if (!cli_bridge::submit(cmd.c_str())) {
+    req->send(503, "application/json", "{\"error\":\"Warteschlange voll, bitte kurz warten\"}");
+    return;
+  }
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void sendLog(AsyncWebServerRequest* req, LogBuffer& log) {
+  if (!checkAuth(req)) return;
+  uint32_t since = 0;
+  if (req->hasParam("since")) since = strtoul(req->getParam("since")->value().c_str(), nullptr, 10);
+
+  String j;
+  j.reserve(4096);
+  j += "{\"lines\":[";
+  bool gap = false;
+  uint32_t next = log.appendJson(since, 60, j, gap);
+  j += "],\"next\":";
+  j += String(next);
+  j += ",\"gap\":";
+  j += gap ? "true" : "false";
+  j += '}';
+  req->send(200, "application/json", j);
+}
+
 static void handleReboot(AsyncWebServerRequest* req) {
   if (!checkAuth(req)) return;
   req->send(200, "application/json", "{\"ok\":true}");
@@ -185,16 +223,21 @@ static void handleReboot(AsyncWebServerRequest* req) {
 }
 
 void web_ui::begin() {
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest* req) {
+  // Alle Routen exakt matchen: ein String-URI matcht sonst auch Unterpfade
+  // ("/api/wifi" -> "/api/wifi/scan"), siehe Memory zu ESPAsyncWebServer.
+  server.on(AsyncURIMatcher::exact("/"), HTTP_GET, [](AsyncWebServerRequest* req) {
     if (!checkAuth(req)) return;
     AsyncWebServerResponse* r = req->beginResponse(200, "text/html", (const uint8_t*)INDEX_HTML, strlen(INDEX_HTML));
     r->addHeader("Cache-Control", "no-store");
     req->send(r);
   });
-  server.on("/api/status", HTTP_GET, handleStatus);
-  server.on("/api/wifi/scan", HTTP_GET, handleWifiScan);
-  server.on("/api/wifi", HTTP_POST, handleWifiSave);
-  server.on("/api/reboot", HTTP_POST, handleReboot);
+  server.on(AsyncURIMatcher::exact("/api/status"), HTTP_GET, handleStatus);
+  server.on(AsyncURIMatcher::exact("/api/wifi/scan"), HTTP_GET, handleWifiScan);
+  server.on(AsyncURIMatcher::exact("/api/wifi"), HTTP_POST, handleWifiSave);
+  server.on(AsyncURIMatcher::exact("/api/reboot"), HTTP_POST, handleReboot);
+  server.on(AsyncURIMatcher::exact("/api/cli"), HTTP_POST, handleCli);
+  server.on(AsyncURIMatcher::exact("/api/console"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, console_log); });
+  server.on(AsyncURIMatcher::exact("/api/packets"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, packet_log); });
   server.onNotFound([](AsyncWebServerRequest* req) {
     req->send(404, "text/plain", "Nicht gefunden");
   });

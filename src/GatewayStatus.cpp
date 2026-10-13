@@ -1,9 +1,7 @@
 #include "GatewayStatus.h"
 
 #include <Mesh.h>
-#include "MyMesh.h"
-
-extern MyMesh the_mesh;
+#include "GatewayMesh.h"
 
 static SemaphoreHandle_t s_lock = nullptr;
 static MeshSnapshot s_snap = {};

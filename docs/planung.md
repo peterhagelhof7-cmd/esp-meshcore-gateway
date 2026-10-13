@@ -118,7 +118,7 @@ Login-Schutz der Weboberfläche ist Pflicht (Konsole kann `erase`, Private-Key-E
 |---|---|---|
 | M0 ✅ | Toolchain, upstream `heltec_v4_repeater` **unverändert** bauen | Build grün (V4 + R8, 2026-10-13); Flash-Baseline offen |
 | M1 🟡 | Eigenes Repo: Submodul + eigenes Env, Repeater-Kern + WLAN/Installer-AP + Status-Seite, CPU 240 MHz | Build grün V4 + R8 (2026-10-13); **HW-Test offen** |
-| M2 | Webkonsole (WebSocket → CLI-Queue) + Live-Paket-Log | alle CLI-Befehle aus Doku durchprobieren |
+| M2 🟡 | Webkonsole (HTTP-Polling → CLI-Queue, E10) + Live-Paket-Log | Build grün V4 + R8, UI-Test gegen Mock 16/16 (2026-10-13); **HW-Test offen** |
 | M3 | Komplette MeshCore-Einstellungsseite + Backup/Restore + Web-Login | Werte ↔ `get`-Ausgabe identisch |
 | M4 | Kanäle: Verwaltung + Senden (+ Empfang anzeigen) | Nachricht kommt in offizieller App im Kanal an |
 | M5 | OTA (Identität + Downgrade-Check), NTP→Uhr, OLED-Status | OTA-Upload auf HW |

@@ -10,9 +10,11 @@
 #include <Arduino.h>   // needed for PlatformIO
 #include <Mesh.h>
 
-#include "MyMesh.h"
+#include "GatewayMesh.h"
 
+#include "CliBridge.h"
 #include "GatewayConfig.h"
+#include "LogBuffer.h"
 #include "GatewayStatus.h"
 #include "NetworkManager.h"
 #include "WebUi.h"
@@ -32,7 +34,7 @@
 StdRNG fast_rng;
 SimpleMeshTables tables;
 
-MyMesh the_mesh(board, radio_driver, *new ArduinoMillis(), fast_rng, rtc_clock, tables);
+GatewayMesh the_mesh(board, radio_driver, *new ArduinoMillis(), fast_rng, rtc_clock, tables);
 
 void halt() {
   while (1) ;
@@ -48,6 +50,11 @@ static unsigned long next_status_update = 0;
 void setup() {
   Serial.begin(115200);
   delay(1000);
+
+  // Früh, damit schon die ersten Pakete/Meldungen im Web-Log landen.
+  console_log.begin();
+  packet_log.begin();
+  cli_bridge::begin();
 
   board.begin();
   Serial.printf("MeshCore Gateway %s (MeshCore %s), CPU %u MHz\n",
@@ -104,6 +111,7 @@ void setup() {
   gw_config.begin();
   network.begin();
   web_ui::begin();
+  console_log.push('s', the_mesh.getRTCClock()->getCurrentTime(), "Gateway gestartet, MeshCore " FIRMWARE_VERSION);
 
   // send out initial zero hop Advertisement to the mesh
 #if ENABLE_ADVERT_ON_BOOT == 1
@@ -134,9 +142,13 @@ void loop() {
     command[len - 1] = 0;  // replace newline with C string null terminator
     char reply[160];
     reply[0] = 0;
+    // Serielle Befehle zusätzlich in der Webkonsole mitprotokollieren.
+    uint32_t now = the_mesh.getRTCClock()->getCurrentTime();
+    console_log.push('c', now, command);
     the_mesh.handleCommand(0, command, reply);  // NOTE: there is no sender_timestamp via serial!
     if (reply[0]) {
       Serial.print("  -> "); Serial.println(reply);
+      console_log.pushLines('r', now, reply);
     }
 
     command[0] = 0;  // reset command buffer
@@ -150,6 +162,7 @@ void loop() {
   rtc_clock.tick();
 
   // --- Gateway-Erweiterungen ---
+  cli_bridge::process();
   network.loop();
   web_ui::loop();
   if ((long)(millis() - next_status_update) >= 0) {

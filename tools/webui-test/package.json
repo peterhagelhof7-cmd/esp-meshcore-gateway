@@ -1,0 +1,6 @@
+{
+  "name": "webui-test",
+  "private": true,
+  "description": "UI-Smoke-Test der Gateway-Weboberfläche gegen einen Mock-Server",
+  "dependencies": { "puppeteer-core": "23.11.1" }
+}

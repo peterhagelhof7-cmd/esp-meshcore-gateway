@@ -82,3 +82,53 @@ ESP32 mit Arduino-Core 2.x aufwendig. Neu bewerten, sobald die Webkonsole kommt 
 `stats-core` liest die Akkuspannung, und `HeltecV4Board::getBattMilliVolts()` enthält `delay(10)`.
 Ein Snapshot pro Sekunde würde den Mesh-Loop 1 % der Zeit blockieren. Deshalb gibt es den Snapshot
 nur alle 5 s, die Web-Seite fragt im selben Takt ab.
+
+## E10 – Konsole und Paket-Log per HTTP-Polling statt WebSocket (2026-10-13)
+**Abweichung vom Plan:** In `planung.md` war ein WebSocket vorgesehen. Umgesetzt ist Polling:
+- `POST /api/cli` legt den Befehl in die Queue (E4) und antwortet sofort.
+- `GET /api/console?since=N` und `GET /api/packets?since=N` liefern neue Zeilen aus Ringpuffern
+  (150 bzw. 300 Zeilen, im PSRAM). Jede Zeile hat eine fortlaufende Sequenznummer, ein Überlauf
+  wird als `gap` gemeldet.
+- Die Seite fragt nur den sichtbaren Tab ab, jede Sekunde. Nach einem Befehl fragt sie zusätzlich
+  nach 150, 400 und 900 ms nach, die Antwort ist also praktisch sofort da.
+
+**Begründung:** Basic-Auth gilt damit einheitlich für jeden Request. Ob Browser die gecachten
+Basic-Credentials beim WebSocket-Handshake mitschicken, ist nicht verlässlich geregelt. Außerdem
+schreibt der Mesh-Loop nur in einen Puffer und sendet nie selbst über den Netzwerk-Stack. Eine
+Latenz von unter 1 s reicht für eine Admin-Konsole.
+
+## E11 – Webkonsole mit den Rechten der seriellen Konsole (2026-10-13)
+Web-Befehle laufen wie die serielle CLI mit `sender_timestamp = 0`. Damit gehen auch die
+„Serial Only“-Befehle: `erase`, `set freq`, `get/set prv.key`, `stats-*`, `log`.
+- `log` schreibt den Datei-Log weiterhin **nur seriell** (Upstream `dumpLogFile()`). In der
+  Webkonsole kommt keine Antwort. Ein Download des Datei-Logs ist ein Kandidat für M3/M5.
+- Serielle Befehle erscheinen zusätzlich in der Webkonsole (Mitprotokoll).
+- Leerzeilen sind erlaubt, weil `region load` mit einer Leerzeile beendet wird.
+- Die Bestätigungsdialoge der Oberfläche (`erase`, `reboot`, `poweroff` …) sind nur UX, **keine**
+  Sicherheitsgrenze.
+
+**Sicherheit (Neubewertung von E7):** Wer das Admin-Passwort hat, kann über HTTP im LAN auch den
+privaten Schlüssel lesen oder den Knoten löschen. Das Passwort selbst geht dabei unverschlüsselt
+über die Leitung (Basic-Auth). Für den Betrieb im Heimnetz ist das akzeptiert, weil das
+Admin-Passwort übers Mesh dieselben Rechte gibt.
+Offene Option für später: Schalter „Schlüssel-Befehle im Web sperren“ oder HTTPS.
+
+## E12 – Kein Akku, kein Bluetooth (2026-10-13, Vorgabe User)
+Akku und Bluetooth sind derzeit nicht zur Nutzung vorgesehen.
+- Die Statusseite zeigt keine Akkuspannung mehr. `stats-core` in der Konsole liefert `battery_mv`
+  weiterhin unverändert wie im Original.
+- Die Repeater-Firmware enthält ohnehin keinen BLE-Stack. Es gibt nichts abzuschalten.
+- **Hinweis:** `poweroff`/`shutdown` versetzt den ESP in Deep-Sleep ohne Weckquelle. Ohne Akku und
+  Taster-Wake ist das Gateway danach nur per Reset oder Stromtrennung zurückzuholen. Die
+  Oberfläche warnt davor.
+
+## E13 – Exaktes Routen-Matching im Webserver (2026-10-13)
+Alle Routen sind mit `AsyncURIMatcher::exact()` registriert. In ESPAsyncWebServer matcht ein
+String-URI sonst auch Unterpfade (`/api/wifi` → `/api/wifi/scan`). Dieser bekannte Fallstrick
+aus der sensormeter-Familie wird hier von Anfang an vermieden.
+
+## E14 – Web-UI-Test ohne Hardware (2026-10-13)
+`tools/webui-test/`: `mock_server.py` liest die Seite direkt aus `src/web/index_html.h` und simuliert
+die API. `test.js` (puppeteer-core mit dem installierten Chrome) prüft Status, Konsole (Echo,
+mehrzeilige Antwort, Schnellbuttons, Verlauf, abgelehnter `erase`), Paket-Filter, Mobilbreite und
+JS-Fehler. Stand M2: **16/16 PASS**. Das ersetzt keinen Hardware-Test.
