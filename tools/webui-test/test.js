@@ -128,6 +128,87 @@ async function runCli(page, cmd) {
     await page.screenshot({ path: out + '/08_channels.png', fullPage: true });
   }
 
+  // ---------- Sensormeter ----------
+  {
+    const t = async sel => page.$eval(sel, e => e.textContent);
+    const until = async (fn, ms = 8000) => { const s = Date.now(); while (Date.now() - s < ms) { if (await fn()) return true; await sleep(200); } return false; };
+    const rows = sel => page.$$eval(sel + ' tr', r => r.map(x => [...x.children].map(c => c.textContent)));
+    const setVal = (sel, v) => page.$eval(sel, (e, v) => { e.value = v; e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); }, v);
+    await page.click('nav a[data-v=sm]');
+    check('SM: leer', await until(async () => !(await page.$eval('#smDevEmpty', e => e.hidden))));
+    // Echtes Sensormeter im LAN (live, 2026-10-14 erreichbar)
+    await setVal('#sdName', 'Büro');
+    await setVal('#sdHost', '192.168.178.148');
+    await page.click('#sdSave');
+    check('SM: echtes Gerät online mit Temperatur', await until(async () => {
+      const r = await rows('#smDevBody'); return r.length === 1 && r[0][2].startsWith('✓') && /Temperatur \d+(\.\d)?°C/.test(r[0][3]);
+    }, 15000), JSON.stringify(await rows('#smDevBody')));
+    // Simuliertes heißes Gerät mit Passwort
+    await setVal('#sdName', 'Heizraum');
+    await setVal('#sdHost', 'sim-hot');
+    await setVal('#sdUser', 'admin');
+    await setVal('#sdPass', 'geheim');
+    await page.click('#sdSave');
+    check('SM: zweites Gerät', await until(async () => (await rows('#smDevBody')).length === 2));
+    // Ungültige Adresse
+    await setVal('#sdName', 'Kaputt');
+    await setVal('#sdHost', 'bad host');
+    await page.click('#sdSave');
+    check('SM: ungültige Adresse abgelehnt', await until(async () => (await t('#sdMsg')).includes('Adresse ungültig')), await t('#sdMsg'));
+    await page.click('#sdCancel').catch(() => {});
+    await setVal('#sdName', ''); await setVal('#sdHost', '');
+    // Passwort maskiert + bleibt beim Bearbeiten erhalten
+    const cfg1 = await page.evaluate(async () => (await (await fetch('/api/sm')).json()).config);
+    check('SM: Passwort maskiert', cfg1.devices[1].pass === '***');
+    // Regel: Heizraum Temperatur > 30 -> ALARM in Kanal "sensormeter" (idx 1)
+    await page.select('#srDev', '1');
+    await until(async () => (await page.$$eval('#srPath option', o => o.map(x => x.value))).includes('sensor1.temperature'));
+    await page.select('#srPath', 'sensor1.temperature');
+    await setVal('#srThr', '30');
+    await page.select('#srCh', '1');
+    await page.click('#srSave');
+    check('SM: Regel ALARM', await until(async () => { const r = await rows('#smRuleBody'); return r.length === 1 && r[0][3].startsWith('ALARM'); }), JSON.stringify(await rows('#smRuleBody')));
+    check('SM: Meldung im Log', await until(async () => (await t('#smLog')).includes('sensormeter -> ALARM Heizraum: Temperatur 35°C (>30°C)')), (await t('#smLog')).slice(-160));
+    // Regel 2: Büro > 50 -> normal, dann Test-Button
+    await page.select('#srDev', '0');
+    await until(async () => (await page.$$eval('#srPath option', o => o.length)) > 0);
+    await page.select('#srPath', 'sensor1.temperature');
+    await setVal('#srThr', '50');
+    await setVal('#srText', 'Büro zu warm: {value}{unit}');
+    await page.click('#srSave');
+    check('SM: Regel 2 normal', await until(async () => { const r = await rows('#smRuleBody'); return r.length === 2 && r[1][3].startsWith('normal'); }), JSON.stringify(await rows('#smRuleBody')));
+    await page.$$eval('#smRuleBody tr', r => r[1].querySelector('button').click());   // Test
+    check('SM: Test-Button ohne Kanal -> Fehler', await until(async () => (await t('#srMsg')).includes('kein gültiger Kanal')), await t('#srMsg'));
+    // Standardkanal setzen -> Test geht
+    await page.select('#ssCh', '0');
+    check('SM: Einstellung als ungespeichert markiert', (await t('#ssMsg')) === 'ungespeichert');
+    await sleep(3500);   // ein Aktualisierungszyklus darf die Auswahl nicht zurücksetzen
+    check('SM: ungespeicherte Auswahl bleibt', (await page.$eval('#ssCh', e => e.value)) === '0');
+    await page.click('#ssSave');
+    await until(async () => (await t('#ssMsg')) === 'Gespeichert');
+    await until(async () => (await rows('#smRuleBody')).length === 2);
+    await page.$$eval('#smRuleBody tr', r => r[1].querySelector('button').click());
+    const alarmCount = s => (s.match(/ALARM Heizraum/g) || []).length;
+    check('SM: Speichern sendet anstehenden Alarm NICHT erneut', alarmCount(await t('#smLog')) === 1, String(alarmCount(await t('#smLog'))));
+    check('SM: Log nennt behaltene Zustände', (await t('#smLog')).includes('Regeln mit Zustand behalten'));
+    check('SM: Test mit eigenem Text -> TEST-Präfix', await until(async () => /#test -> TEST Büro zu warm: \d+(\.\d)?°C/.test(await t('#smLog'))), (await t('#smLog')).slice(-160));
+    // Gerät bearbeiten ohne Passwortänderung -> Passwort bleibt
+    await page.$$eval('#smDevBody tr', r => r[1].querySelectorAll('button')[1].click());
+    check('SM: Bearbeiten-Formular', (await page.$eval('#sdPass', e => e.value)) === '***');
+    await setVal('#sdInt', '30');
+    await page.click('#sdSave');
+    await until(async () => (await t('#sdMsg')) === 'Gerät gespeichert');
+    const kept = await page.evaluate(async () => { const r = await fetch('/api/sm'); return (await r.json()).config.devices[1]; });
+    check('SM: Intervall geändert, Passwort weiter gesetzt', kept.intervalS === 30 && kept.pass === '***', JSON.stringify(kept));
+    await page.screenshot({ path: out + '/10_sensormeter.png', fullPage: true });
+    // Gerät 0 löschen -> Regel 2 (Büro) weg, Regel 1 zeigt jetzt auf Gerät 0
+    await page.$$eval('#smDevBody tr', r => r[0].querySelectorAll('button')[2].click());
+    check('SM: Gerät gelöscht + Regel umnummeriert', await until(async () => {
+      const c = await page.evaluate(async () => (await (await fetch('/api/sm')).json()).config);
+      return c.devices.length === 1 && c.rules.length === 1 && c.rules[0].device === 0 && c.devices[0].name === 'Heizraum';
+    }));
+  }
+
   // ---------- Einstellungen ----------
   const fs = require('fs'), path = require('path');
   const dl = path.resolve(out, 'downloads');
@@ -225,6 +306,9 @@ async function runCli(page, cmd) {
     const root = path.resolve(__dirname, '..', '..');
     const binV4 = path.join(root, '.pio/build/gateway_heltec_v4/firmware.bin');
     const binR8 = path.join(root, '.pio/build/gateway_heltec_v4_r8/firmware.bin');
+    for (const b of [binV4, binR8]) {
+      if (!fs.existsSync(b)) throw new Error('Vorbedingung fehlt: ' + b + ' (beide Envs bauen: tools\\host-test.ps1 -Build)');
+    }
     const txt = path.join(dl, 'keine-firmware.txt');
     fs.writeFileSync(txt, 'Hallo, ich bin keine Firmware');
     const old = path.join(dl, 'alt.bin');

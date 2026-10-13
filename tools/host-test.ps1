@@ -3,7 +3,9 @@
 #   .\tools\host-test.ps1 -Build     # baut vorher beide Envs mit PlatformIO
 param([switch]$Build)
 
-$ErrorActionPreference = 'Stop'
+# Continue statt Stop: PowerShell 5.1 macht sonst aus jeder stderr-Zeile nativer
+# Programme (pio, g++) einen Abbruch. Exit-Codes werden unten explizit geprueft.
+$ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 $out = Join-Path $env:TEMP 'meshcore-gw-hosttest'
 New-Item -ItemType Directory -Force $out | Out-Null
@@ -45,15 +47,17 @@ foreach ($e in $envs) {
     Invoke-Test $exe @($bin, $e.Id, $version)
 }
 
-# 2) Regel-Engine (Sensormeter-Alarme)
+# 2) Regel-Engine + Sensormeter-JSON
 $ruleTest = Join-Path $root 'test/host/rule_engine_test.cpp'
 if (Test-Path $ruleTest) {
     $exe = Join-Path $out 'rule_engine_test.exe'
-    & g++ -std=c++17 -O1 -Wall -Wextra -I (Join-Path $root 'src') `
-        $ruleTest (Join-Path $root 'src/RuleEngine.cpp') -o $exe
+    $aj = Join-Path $root '.pio/libdeps/gateway_heltec_v4/ArduinoJson/src'
+    if (-not (Test-Path $aj)) { throw "ArduinoJson fehlt ($aj) - einmal mit -Build bauen" }
+    & g++ -std=c++17 -O2 -Wall -Wextra -I (Join-Path $root 'src') -I $aj `
+        $ruleTest (Join-Path $root 'src/RuleEngine.cpp') (Join-Path $root 'src/SmJson.cpp') -o $exe
     if ($LASTEXITCODE -ne 0) { throw 'Compile rule_engine_test fehlgeschlagen' }
     Write-Host '== Regel-Engine'
-    Invoke-Test $exe @()
+    Invoke-Test $exe @((Join-Path $root 'test/host/fixtures'))
 }
 
 if ($failed) { Write-Host "$failed Testlauf/-laeufe mit Fehlern" -ForegroundColor Red; exit 1 }

@@ -21,6 +21,8 @@
 #include "GatewayStatus.h"
 #include "NetworkManager.h"
 #include "OtaUpdate.h"
+#include "SmConfig.h"
+#include "SmPoller.h"
 #include "WebUi.h"
 
 #if !defined(ESP32)
@@ -63,6 +65,7 @@ void setup() {
   console_log.begin();
   packet_log.begin();
   channel_log.begin();
+  alert_log.begin();
   cli_bridge::begin();
   mesh_actions::begin();
   channel_store::begin();
@@ -128,6 +131,8 @@ void setup() {
   network.begin();
   web_ui::begin();
   ota_update::begin();
+  sm::begin();
+  sm_poller::begin();   // eigener Task auf Core 0
   console_log.push('s', the_mesh.getRTCClock()->getCurrentTime(), "Gateway gestartet, MeshCore " FIRMWARE_VERSION);
 
   if (first_boot) {
