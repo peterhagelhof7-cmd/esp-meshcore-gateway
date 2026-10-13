@@ -1,22 +1,40 @@
 # Mock des Gateway-Webservers für UI-Tests ohne Hardware.
-# Liefert index.html und simuliert /api/status, /api/cli, /api/console, /api/packets.
-import json, sys, time, threading
+#
+# - index.html kommt direkt aus src/web/index_html.h (immer aktueller Stand)
+# - das Empfehlungsprofil wird aus src/Profile.cpp geparst (eine Quelle)
+# - FakeCli bildet die get/set/region-Antwortformate von MeshCore 1.17.1
+#   (CommonCLI.cpp) nach, Startzustand = Upstream-Repeater-Defaults
+#
+# Start: python -I mock_server.py [port]
+import json, os, re, sys, threading, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-import os
-# index.html direkt aus dem Firmware-Header ziehen, damit immer der aktuelle Stand getestet wird.
-HDR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src', 'web', 'index_html.h')
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src')
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
 
+
 def index_html():
-    src = open(HDR, encoding='utf-8').read()
+    src = open(os.path.join(ROOT, 'web', 'index_html.h'), encoding='utf-8').read()
     return src.split('R"HTML(', 1)[1].rsplit(')HTML"', 1)[0].encode('utf-8')
+
+
+def load_profile():
+    src = open(os.path.join(ROOT, 'Profile.cpp'), encoding='utf-8').read()
+    name = re.search(r'profile::NAME = "([^"]*)"', src).group(1)
+    entries = []
+    for m in re.finditer(r'\{"([^"]*)", (nullptr|"[^"]*"), (nullptr|"[^"]*"), "([^"]*)"\}', src):
+        unq = lambda s: None if s == 'nullptr' else s[1:-1]
+        entries.append({'cmd': m.group(1), 'get': unq(m.group(2)), 'expect': unq(m.group(3)), 'why': m.group(4)})
+    return {'name': name, 'entries': entries}
+
+
 CAP = {'console': 150, 'packets': 300}
 logs = {'console': [], 'packets': []}
 seq = {'console': 1, 'packets': 1}
 lock = threading.Lock()
 t0 = time.time()
+
 
 def push(name, t, x):
     with lock:
@@ -25,20 +43,193 @@ def push(name, t, x):
         if len(logs[name]) > CAP[name]:
             logs[name].pop(0)
 
+
+def ftoa(f):
+    s = ('%.6f' % f).rstrip('0').rstrip('.')
+    return s if s else '0'
+
+
+class FakeCli:
+    """Nachbau der Antwortformate von CommonCLI (1.17.1), nur was die UI nutzt."""
+
+    def __init__(self):
+        self.p = {'name': 'Heltec Repeater', 'lat': 0.0, 'lon': 0.0, 'owner.info': '', 'guest.password': '',
+                  'freq': 869.618, 'bw': 62.5, 'sf': 8, 'cr': 5, 'tx': 17, 'af': 1.0,
+                  'radio.rxgain': 'on', 'radio.fem.rxgain': 'on', 'repeat': 'on',
+                  'flood.max': 64, 'flood.max.unscoped': 64, 'flood.max.advert': 8,
+                  'txdelay': 0.5, 'direct.txdelay': 0.3, 'rxdelay': 0.0, 'path.hash.mode': 0,
+                  'loop.detect': 'off', 'cad': 'off', 'int.thresh': 0, 'agc': 0, 'multi.acks': 0,
+                  'allow.read.only': 'off', 'advert.interval': 2, 'flood.advert.interval': 47,
+                  'password': 'password'}
+        self.regions = []   # [name, parent, flood, home]
+        self.key = 'ab' * 64
+
+    def region_tree(self):
+        out = ['* F']
+        def rec(parent, depth):
+            for r in self.regions:
+                if r[1] == parent:
+                    out.append(' ' * depth + r[0] + ('^' if r[3] else '') + (' F' if r[2] else ''))
+                    rec(r[0], depth + 1)
+        rec(None, 1)
+        return '\n'.join(out) + '\n'
+
+    def find(self, n):
+        n = n.lstrip('#')
+        for r in self.regions:
+            if r[0] == n:
+                return r
+        for r in self.regions:
+            if r[0].startswith(n):
+                return r
+        return None
+
+    def get(self, k):
+        p = self.p
+        if k == 'radio': return '> %s,%.3f,%d,%d' % (ftoa(p['freq']), p['bw'], p['sf'], p['cr'])
+        if k == 'dutycycle': return '> %.1f%%' % (100.0 / (p['af'] + 1))
+        if k == 'agc.reset.interval': return '> %d' % (p['agc'] * 4)
+        if k == 'advert.interval': return '> %d' % (p['advert.interval'] * 2)
+        if k == 'radio.fem.txgain': return 'Error: unsupported'
+        if k == 'prv.key': return '> ' + self.key
+        if k in ('lat', 'lon', 'txdelay', 'direct.txdelay', 'rxdelay'): return '> ' + ftoa(p[k])
+        if k in p: return '> %s' % p[k]
+        return '??: ' + k
+
+    def set(self, k, v):
+        p = self.p
+        try:
+            if k == 'radio':
+                f, b, s, c = v.split(',')
+                p['freq'], p['bw'], p['sf'], p['cr'] = float(f), float(b), int(s), int(c)
+                return 'OK - reboot to apply'
+            if k == 'dutycycle':
+                dc = float(v)
+                if dc < 1 or dc > 100: return 'ERROR: dutycycle must be 1-100'
+                p['af'] = 100.0 / dc - 1
+                return 'OK - %.1f%%' % (100.0 / (p['af'] + 1))
+            if k == 'agc.reset.interval':
+                p['agc'] = int(v) // 4
+                return 'OK - interval rounded to %d' % (p['agc'] * 4)
+            if k == 'advert.interval':
+                m = int(v)
+                if (0 < m < 60) or m > 240: return 'Error: interval range is 60-240 minutes'
+                p['advert.interval'] = m // 2
+                return 'OK'
+            if k == 'flood.advert.interval':
+                h = int(v)
+                if (0 < h < 3) or h > 168: return 'Error: interval range is 3-168 hours'
+                p[k] = h
+                return 'OK'
+            if k == 'radio.fem.txgain': return 'Error: unsupported'
+            if k == 'radio.fem.rxgain':
+                p[k] = v
+                return 'OK - LoRa FEM RX gain ' + v
+            if k == 'name':
+                if re.search(r'[\[\]\\:,?*]', v): return 'Error, bad chars'
+                p[k] = v
+                return 'OK'
+            if k == 'prv.key':
+                self.key = v
+                return 'OK, reboot to apply! New pubkey: ' + 'cd' * 32
+            if k == 'repeat':
+                p[k] = 'off' if v.startswith('off') else 'on'
+                return 'OK - repeat is now ' + p[k].upper()
+            if k in ('lat', 'lon', 'txdelay', 'direct.txdelay', 'rxdelay'):
+                p[k] = float(v)
+                return 'OK'
+            if k in p:
+                p[k] = int(v) if isinstance(p[k], int) else v
+                return 'OK'
+        except ValueError:
+            return 'Error, invalid params'
+        return 'unknown config: ' + k
+
+    def run(self, cmd):
+        if cmd == 'ver': return 'v1.17.1 (Build: 14 Aug 2026)'
+        if cmd == 'neighbors': return 'AB12CD34:1760000000:28\nEF56AB78:1760000100:-12'
+        if cmd.startswith('get '): return self.get(cmd[4:])
+        if cmd.startswith('set '):
+            k, _, v = cmd[4:].partition(' ')
+            return self.set(k, v)
+        if cmd.startswith('password '):
+            self.p['password'] = cmd[9:][:15]
+            return 'password now: ' + self.p['password']
+        if cmd == 'region': return self.region_tree()
+        parts = cmd.split(' ')
+        if parts[0] == 'region' and len(parts) >= 2:
+            a = parts[1]
+            if a == 'save': return 'OK'
+            if a == 'put' and len(parts) >= 3:
+                parent = None
+                if len(parts) >= 4:
+                    pr = self.find(parts[3])
+                    if not pr: return 'Err - unknown parent'
+                    parent = pr[0]
+                r = self.find(parts[2])
+                if r and r[0] == parts[2]: r[1] = parent
+                else: self.regions.append([parts[2], parent, True, False])
+                return 'OK - (flood allowed)'
+            r = self.find(parts[2]) if len(parts) >= 3 else None
+            if a in ('allowf', 'denyf', 'home', 'get', 'remove') and not r: return 'Err - unknown region'
+            if a == 'allowf': r[2] = True; return 'OK'
+            if a == 'denyf': r[2] = False; return 'OK'
+            if a == 'home':
+                for x in self.regions: x[3] = False
+                r[3] = True
+                return ' home is now ' + r[0]
+            if a == 'get': return ' %s %s' % (r[0], 'F' if r[2] else '')
+            if a == 'remove': self.regions.remove(r); return 'OK'
+        return 'Unknown command'
+
+
+cli = FakeCli()
+PROFILE = load_profile()
+jobs = {}
+job_id = [1]
+
+
+def run_job(jid, cmds, quiet):
+    for c in cmds:
+        time.sleep(0.01)
+        with lock:
+            rep = cli.run(c)
+        is_query = c.startswith('get ') or c.startswith('region get ') or c in ('region', 'ver')
+        if not (quiet and is_query):
+            masked = 'password ********' if c.startswith('password ') else ('set prv.key ********' if c.startswith('set prv.key ') else c)
+            push('console', 'c', masked)
+            if rep:
+                if c.startswith('password '): rep = 'password now: ********'
+                for part in rep.rstrip('\n').split('\n'):
+                    push('console', 'r', part)
+        with lock:
+            jobs[jid]['replies'].append({'cmd': c, 'reply': rep})
+    with lock:
+        jobs[jid]['done'] = True
+
+
+def submit(cmds, quiet):
+    with lock:
+        jid = job_id[0]; job_id[0] += 1
+        jobs[jid] = {'id': jid, 'done': False, 'replies': []}
+    threading.Thread(target=run_job, args=(jid, cmds, quiet), daemon=True).start()
+    return jid
+
+
 push('console', 's', 'Gateway gestartet, MeshCore v1.17.1')
 for i in range(5):
     push('packets', 'R', f'len=40 ADVERT(4) route=F hops={i} payload=30 SNR=7.5 RSSI=-90 score=900')
     push('packets', 'T', f'len=40 ADVERT(4) route=F hops={i+1} payload=30')
 
-REPLIES = {'ver': 'v1.17.1 (Build: 14 Aug 2026)', 'neighbors': 'AB12CD34:1760000000:28\nEF56AB78:1760000100:-12',
-           'get radio': '> 869.618,62.5,8,8'}
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
+
     def send_json(self, obj, code=200):
         b = json.dumps(obj).encode()
         self.send_response(code); self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
+
     def do_GET(self):
         u = urlparse(self.path); q = parse_qs(u.query)
         if u.path == '/':
@@ -46,10 +237,11 @@ class H(BaseHTTPRequestHandler):
             self.send_response(200); self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b); return
         if u.path == '/api/status':
-            return self.send_json({'gateway': {'version': '0.1.0', 'uptime_ms': 1000, 'free_heap': 180000, 'cpu_mhz': 240},
-              'node': {'name': 'Mock GW', 'pubkey': 'ab' * 32, 'role': 'repeater', 'firmware': 'v1.17.1', 'build_date': '14 Aug 2026',
-                       'lat': 0, 'lon': 0, 'forwarding': True},
-              'radio': {'freq': 869.618, 'bw': 62.5, 'sf': 8, 'cr': 8, 'tx_power': 10},
+            p = cli.p
+            return self.send_json({'gateway': {'version': '0.2.0', 'uptime_ms': 1000, 'free_heap': 180000, 'cpu_mhz': 240},
+              'node': {'name': p['name'], 'pubkey': 'ab' * 32, 'role': 'repeater', 'firmware': 'v1.17.1', 'build_date': '14 Aug 2026',
+                       'lat': p['lat'], 'lon': p['lon'], 'forwarding': p['repeat'] == 'on'},
+              'radio': {'freq': p['freq'], 'bw': p['bw'], 'sf': p['sf'], 'cr': p['cr'], 'tx_power': p['tx']},
               'stats_core': {'battery_mv': 0, 'uptime_secs': 3725, 'errors': 0, 'queue_len': 0},
               'stats_radio': {'noise_floor': -112, 'last_rssi': -90, 'last_snr': 7.5, 'tx_air_secs': 3, 'rx_air_secs': 12},
               'stats_packets': {'recv': 10, 'sent': 5, 'flood_tx': 5, 'direct_tx': 0, 'flood_rx': 10, 'direct_rx': 0, 'recv_errors': 0},
@@ -64,26 +256,38 @@ class H(BaseHTTPRequestHandler):
                 out = [l for l in L if l['s'] >= max(since, oldest)][:60]
                 nxt = (out[-1]['s'] + 1) if out else max(since, oldest)
             return self.send_json({'lines': out, 'next': nxt, 'gap': gap})
+        if u.path == '/api/cli/job':
+            jid = int(q.get('id', ['0'])[0])
+            with lock:
+                j = jobs.get(jid)
+                j = json.loads(json.dumps(j)) if j else None
+            return self.send_json(j) if j else self.send_json({'error': 'Auftrag unbekannt'}, 404)
+        if u.path == '/api/profile':
+            return self.send_json(PROFILE)
         self.send_response(404); self.end_headers()
+
     def do_POST(self):
         u = urlparse(self.path)
         body = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
+        form = parse_qs(body, keep_blank_values=True)
         if u.path == '/api/cli':
-            cmd = parse_qs(body, keep_blank_values=True).get('cmd', [''])[0]
-            def run():
-                time.sleep(0.05)
-                push('console', 'c', cmd)
-                rep = REPLIES.get(cmd, 'Unknown command' if cmd else '')
-                for part in rep.split('\n'):
-                    if rep: push('console', 'r', part)
-            threading.Thread(target=run).start()
+            return self.send_json({'ok': True, 'id': submit([form.get('cmd', [''])[0]], False)})
+        if u.path == '/api/cli/batch':
+            cmds = form.get('cmd', [])
+            if not cmds or len(cmds) > 40:
+                return self.send_json({'error': '1 bis 40 Befehle pro Auftrag'}, 400)
+            return self.send_json({'ok': True, 'id': submit(cmds, form.get('quiet', ['0'])[0] == '1')})
+        if u.path == '/api/reboot':
             return self.send_json({'ok': True})
         self.send_response(404); self.end_headers()
+
 
 def traffic():
     i = 0
     while True:
         time.sleep(0.5); i += 1
         push('packets', 'R' if i % 2 else 'T', f'len={20+i%30} GRP_TXT(5) route=F hops=1 payload=25 #{i}')
+
+
 threading.Thread(target=traffic, daemon=True).start()
 ThreadingHTTPServer(('127.0.0.1', PORT), H).serve_forever()

@@ -2,21 +2,30 @@
 
 #include <Arduino.h>
 
-// Webkonsole -> offizielle MeshCore-CLI.
+// Web -> offizielle MeshCore-CLI.
 //
-// Der Web-Task legt Befehle nur in eine FreeRTOS-Queue (submit). Der loopTask
-// arbeitet sie in process() ab und ruft dort the_mesh.handleCommand() auf -
-// genau wie die serielle CLI in simple_repeater/main.cpp, also mit
-// sender_timestamp = 0. Damit gelten für die Webkonsole dieselben Rechte wie
-// für die serielle Konsole, inkl. "Serial Only"-Befehle (erase, set freq,
-// get prv.key, stats-*). Abgesichert ist das über den Web-Login
-// (docs/entscheidungen.md E7/E11).
+// Der Web-Task legt Befehle als Job (1..MAX_BATCH Befehle) ab (submit). Der
+// loopTask arbeitet pro loop()-Durchlauf genau einen Befehl ab und ruft dort
+// the_mesh.handleCommand() auf - wie die serielle CLI in simple_repeater, also
+// mit sender_timestamp = 0 und denselben Rechten inkl. "Serial Only"-Befehlen
+// (docs/entscheidungen.md E4/E11). Jede Antwort wird im Job gespeichert und
+// kann per id abgeholt werden (Einstellungsseite, E16).
 namespace cli_bridge {
   static const size_t MAX_CMD_LEN = 159;   // wie command[160] in simple_repeater
+  static const size_t MAX_REPLY_LEN = 191;
+  static const size_t MAX_BATCH = 40;
 
   bool begin();
-  // Thread-sicher. false = Warteschlange voll.
-  bool submit(const char* cmd);
-  // Nur aus dem loopTask.
-  void process();
+
+  // Thread-sicher. Rückgabe: Job-id (> 0) oder 0, wenn alle Job-Plätze belegt
+  // sind. quiet = reine get-Abfragen nicht in die Webkonsole schreiben.
+  uint32_t submit(const char* const* cmds, size_t count, bool quiet);
+  uint32_t submitOne(const char* cmd);
+
+  // Thread-sicher. Hängt {"done":..,"replies":[..]} an out an.
+  // false = id unbekannt (zu alt oder nie vergeben).
+  bool jobJson(uint32_t id, String& out);
+
+  // Nur aus dem loopTask. true, wenn dabei ein Job fertig wurde.
+  bool process();
 }

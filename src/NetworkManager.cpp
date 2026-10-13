@@ -1,7 +1,22 @@
 #include "NetworkManager.h"
 #include "GatewayConfig.h"
 
+#include <esp_sntp.h>
+
 NetworkManager network;
+
+// Wird vom SNTP-Callback (lwIP-Task) gesetzt, im loopTask abgeholt.
+static volatile bool s_timeSynced = false;
+
+static void onTimeSync(struct timeval* tv) {
+  s_timeSynced = true;
+}
+
+bool NetworkManager::takeTimeSynced() {
+  if (!s_timeSynced) return false;
+  s_timeSynced = false;
+  return true;
+}
 
 static const unsigned long WLAN_CHECK_TIMEOUT_MS = 5UL * 60UL * 1000UL;
 static const unsigned long WLAN_TEST_TIMEOUT_MS = 30UL * 1000UL;
@@ -119,6 +134,14 @@ void NetworkManager::loop() {
   }
 
   if (_gotIp) {
+    if (!_sntpStarted) {
+      // UTC, wie MeshCore intern rechnet. SNTP synchronisiert danach selbstständig
+      // weiter (Standard-Intervall 1 h), jede Synchronisation meldet onTimeSync.
+      sntp_set_time_sync_notification_cb(onTimeSync);
+      configTime(0, 0, "pool.ntp.org", "time.cloudflare.com");
+      _sntpStarted = true;
+      Serial.println("[NET] NTP gestartet");
+    }
     _checkStartedMs = now;   // Timeout läuft erst ab Verbindungsverlust
     _checkTimeoutMs = WLAN_CHECK_TIMEOUT_MS;
     _lastReconnectMs = now;

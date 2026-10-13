@@ -4,11 +4,14 @@
 #include <ESPAsyncWebServer.h>
 #include <WiFi.h>
 
+#include <vector>
+
 #include "CliBridge.h"
 #include "GatewayConfig.h"
 #include "GatewayStatus.h"
 #include "LogBuffer.h"
 #include "NetworkManager.h"
+#include "Profile.h"
 #include "web/index_html.h"
 
 static AsyncWebServer server(80);
@@ -191,11 +194,85 @@ static void handleCli(AsyncWebServerRequest* req) {
     req->send(400, "application/json", "{\"error\":\"Befehl zu lang (max. 159 Zeichen)\"}");
     return;
   }
-  if (!cli_bridge::submit(cmd.c_str())) {
+  uint32_t id = cli_bridge::submitOne(cmd.c_str());
+  if (!id) {
     req->send(503, "application/json", "{\"error\":\"Warteschlange voll, bitte kurz warten\"}");
     return;
   }
-  req->send(200, "application/json", "{\"ok\":true}");
+  req->send(200, "application/json", String("{\"ok\":true,\"id\":") + id + "}");
+}
+
+// Mehrere Befehle als ein Job: beliebig viele Formularfelder "cmd" (Reihenfolge
+// bleibt erhalten), optional quiet=1 (get-Abfragen nicht in die Konsole).
+static void handleCliBatch(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  static const char* ERR_LEN = "{\"error\":\"Befehl zu lang (max. 159 Zeichen)\"}";
+  std::vector<String> cmds;
+  bool quiet = false;
+  for (size_t i = 0; i < req->params(); i++) {
+    const AsyncWebParameter* p = req->getParam(i);
+    if (!p->isPost()) continue;
+    if (p->name() == "quiet") {
+      quiet = p->value() == "1";
+    } else if (p->name() == "cmd") {
+      String c = p->value();
+      c.replace("\r", "");
+      c.replace("\n", " ");
+      if (c.length() > cli_bridge::MAX_CMD_LEN) {
+        req->send(400, "application/json", ERR_LEN);
+        return;
+      }
+      cmds.push_back(c);
+    }
+  }
+  if (cmds.empty() || cmds.size() > cli_bridge::MAX_BATCH) {
+    req->send(400, "application/json", "{\"error\":\"1 bis 40 Befehle pro Auftrag\"}");
+    return;
+  }
+  const char* ptrs[cli_bridge::MAX_BATCH];
+  for (size_t i = 0; i < cmds.size(); i++) ptrs[i] = cmds[i].c_str();
+  uint32_t id = cli_bridge::submit(ptrs, cmds.size(), quiet);
+  if (!id) {
+    req->send(503, "application/json", "{\"error\":\"Warteschlange voll, bitte kurz warten\"}");
+    return;
+  }
+  req->send(200, "application/json", String("{\"ok\":true,\"id\":") + id + "}");
+}
+
+static void handleCliJob(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  uint32_t id = req->hasParam("id") ? strtoul(req->getParam("id")->value().c_str(), nullptr, 10) : 0;
+  String j;
+  j.reserve(2048);
+  if (!cli_bridge::jobJson(id, j)) {
+    req->send(404, "application/json", "{\"error\":\"Auftrag unbekannt\"}");
+    return;
+  }
+  req->send(200, "application/json", j);
+}
+
+static void handleProfile(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String j;
+  j.reserve(4096);
+  j += "{\"name\":\"";
+  j += jsonEscape(profile::NAME);
+  j += "\",\"entries\":[";
+  for (size_t i = 0; i < profile::COUNT; i++) {
+    const ProfileEntry& e = profile::ENTRIES[i];
+    if (i) j += ',';
+    j += "{\"cmd\":\"";
+    j += jsonEscape(e.cmd);
+    j += "\",\"get\":";
+    j += e.get ? "\"" + jsonEscape(e.get) + "\"" : String("null");
+    j += ",\"expect\":";
+    j += e.expect ? "\"" + jsonEscape(e.expect) + "\"" : String("null");
+    j += ",\"why\":\"";
+    j += jsonEscape(e.why);
+    j += "\"}";
+  }
+  j += "]}";
+  req->send(200, "application/json", j);
 }
 
 static void sendLog(AsyncWebServerRequest* req, LogBuffer& log) {
@@ -236,6 +313,9 @@ void web_ui::begin() {
   server.on(AsyncURIMatcher::exact("/api/wifi"), HTTP_POST, handleWifiSave);
   server.on(AsyncURIMatcher::exact("/api/reboot"), HTTP_POST, handleReboot);
   server.on(AsyncURIMatcher::exact("/api/cli"), HTTP_POST, handleCli);
+  server.on(AsyncURIMatcher::exact("/api/cli/batch"), HTTP_POST, handleCliBatch);
+  server.on(AsyncURIMatcher::exact("/api/cli/job"), HTTP_GET, handleCliJob);
+  server.on(AsyncURIMatcher::exact("/api/profile"), HTTP_GET, handleProfile);
   server.on(AsyncURIMatcher::exact("/api/console"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, console_log); });
   server.on(AsyncURIMatcher::exact("/api/packets"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, packet_log); });
   server.onNotFound([](AsyncWebServerRequest* req) {

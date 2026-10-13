@@ -15,6 +15,7 @@
 #include "CliBridge.h"
 #include "GatewayConfig.h"
 #include "LogBuffer.h"
+#include "Profile.h"
 #include "GatewayStatus.h"
 #include "NetworkManager.h"
 #include "WebUi.h"
@@ -24,6 +25,10 @@
 #endif
 #if ESP32_CPU_FREQ != 240
   #error "ESP32_CPU_FREQ muss 240 sein (build_unflags in platformio.ini prüfen)"
+#endif
+// Werks-Defaults nach hansemesh.de (E15), müssen zum Profil passen.
+#if LORA_TX_POWER != 17 || LORA_CR != 8
+  #error "LORA_TX_POWER muss 17 und LORA_CR 8 sein (build_unflags in platformio.ini prüfen)"
 #endif
 
 #ifdef DISPLAY_CLASS
@@ -98,6 +103,11 @@ void setup() {
 
   sensors.begin();
 
+  // Erststart = noch keine MeshCore-Prefs auf dem Dateisystem (gleiche Prüfung
+  // wie CommonCLI::loadPrefs). Dann wird nach dem Start das Empfehlungsprofil
+  // angewendet (docs/entscheidungen.md E15).
+  bool first_boot = !SPIFFS.exists("/prefs.json") && !SPIFFS.exists("/com_prefs");
+
   the_mesh.begin(fs);
 
 #ifdef DISPLAY_CLASS
@@ -112,6 +122,15 @@ void setup() {
   network.begin();
   web_ui::begin();
   console_log.push('s', the_mesh.getRTCClock()->getCurrentTime(), "Gateway gestartet, MeshCore " FIRMWARE_VERSION);
+
+  if (first_boot) {
+    const char* cmds[cli_bridge::MAX_BATCH];
+    size_t n = 0;
+    for (size_t i = 0; i < profile::COUNT && n < cli_bridge::MAX_BATCH; i++) cmds[n++] = profile::ENTRIES[i].cmd;
+    console_log.push('s', the_mesh.getRTCClock()->getCurrentTime(), "Erststart: wende Profil an");
+    console_log.push('s', the_mesh.getRTCClock()->getCurrentTime(), profile::NAME);
+    cli_bridge::submit(cmds, n, false);
+  }
 
   // send out initial zero hop Advertisement to the mesh
 #if ENABLE_ADVERT_ON_BOOT == 1
@@ -162,9 +181,22 @@ void loop() {
   rtc_clock.tick();
 
   // --- Gateway-Erweiterungen ---
-  cli_bridge::process();
+  if (cli_bridge::process()) {
+    next_status_update = millis();   // geänderte Einstellungen sofort im Snapshot
+  }
   network.loop();
   web_ui::loop();
+  if (network.takeTimeSynced()) {
+    // ESP32RTCClock nutzt die Systemzeit, SNTP hat sie schon gestellt. Bei einer
+    // externen RTC (AutoDiscoverRTCClock, z. B. DS3231) diese mitziehen.
+    uint32_t t = (uint32_t)time(nullptr);
+    rtc_clock.setCurrentTime(t);
+    static bool logged = false;   // SNTP meldet sich stündlich, nur das erste Mal loggen
+    if (!logged) {
+      console_log.push('s', t, "Uhr per NTP gestellt");
+      logged = true;
+    }
+  }
   if ((long)(millis() - next_status_update) >= 0) {
     gateway_status::update();
     next_status_update = millis() + STATUS_UPDATE_INTERVAL_MS;

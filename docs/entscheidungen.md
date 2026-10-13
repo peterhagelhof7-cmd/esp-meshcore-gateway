@@ -132,3 +132,69 @@ aus der sensormeter-Familie wird hier von Anfang an vermieden.
 die API. `test.js` (puppeteer-core mit dem installierten Chrome) prüft Status, Konsole (Echo,
 mehrzeilige Antwort, Schnellbuttons, Verlauf, abgelehnter `erase`), Paket-Filter, Mobilbreite und
 JS-Fehler. Stand M2: **16/16 PASS**. Das ersetzt keinen Hardware-Test.
+
+## E15 – Empfohlene Einstellungen nach hansemesh.de (2026-10-13, Vorgabe User)
+Quellen (abgerufen 2026-10-13): hansemesh.de/anleitungen/repeater-checkliste/,
+/einstellungen-deutschland/, /heltec-v3-v4/. Standortwerte hat der User festgelegt.
+
+| Befehl (1.17.1) | Wert | Herkunft |
+|---|---|---|
+| `set radio` | 869.618,62.5,8,8 | EU/UK Narrow (DE-Standard) |
+| `set tx` | **17** | User (hansemesh: 16 sicher, 17 ≈ 520 mW knapp an 500 mW ERP). Im Web änderbar. |
+| `set dutycycle` | 10 | gesetzlich |
+| `set flood.max` / `.unscoped` / `.advert` | 10 / **5** / **5** | User: ländlich |
+| `set advert.interval` | 240 | Zero-Hop-Advert alle 4 h |
+| `set flood.advert.interval` | **48** | User |
+| `set txdelay` / `direct.txdelay` / `rxdelay` | 0.7 / 0.5 / 0 | Rand-Repeater |
+| `set path.hash.mode` | 2 | 3-Byte-Pfade |
+| `set loop.detect` | minimal | |
+| `set cad` / `int.thresh` | off / 0 | |
+| `set agc.reset.interval` | 60 | Checklisten-Tabelle (4 nur bei tauben Repeatern) |
+| `set multi.acks` | 1 | |
+| `set radio.rxgain` / `radio.fem.rxgain` | off / off | V4 auf 1.17.1 (Noise Floor sonst ca. -84 dBm) |
+| `region put` | **de-he, de-by, rhein-main** + `region save` | User |
+
+**⚠ Abweichungen hansemesh ↔ MeshCore 1.17.1 (gegen CommonCLI.cpp geprüft):**
+- `set advert.interval.zero` / `set advert.interval.flood` gibt es nicht. Richtig sind
+  `set advert.interval <min>` (60–240) und `set flood.advert.interval <h>` (3–168, 0 = aus).
+- `get version` gibt es nicht, der Befehl heißt `ver`.
+- `set timezone` gibt es in der Repeater-CLI nicht. MeshCore rechnet in UTC.
+- `region denyf de` (von hansemesh empfohlen) ist **nicht** gesetzt, der User hat es nicht
+  gewünscht. Achtung beim Nachholen: `findByNamePrefix("de")` trifft als Präfix auch `de-he`
+  oder `de-by`, wenn keine Region exakt „de“ heißt. Vorher also `region put de` anlegen.
+- Die Werte für Name, Admin- und Gast-Passwort sind Sache des Betreibers und nicht im Profil.
+
+**Umsetzung:**
+- Build-Defaults: `LORA_CR=8` (Upstream-Repeater fällt sonst auf **CR 5** zurück, genau die
+  „nach Update CR 5“-Falle aus der Checkliste) und `LORA_TX_POWER=17` statt 10. Beides prüft
+  `main.cpp` per `#error`.
+- Profil `src/Profile.cpp`: jeder Eintrag ist Befehl + Prüf-`get` + Sollwert + Begründung.
+  Beim **Erststart** (kein `/prefs.json` und kein `/com_prefs`) wird es automatisch angewendet.
+  Die Einstellungsseite zeigt jederzeit Ist/Soll und übernimmt Abweichungen auf Knopfdruck.
+- Die ERP-Rechnung hängt von der Antenne ab, die noch nicht feststeht. Bei einer Antenne über ca.
+  2 dBi tx reduzieren (hansemesh-Formel ERP = tx_out + dBd − Verluste).
+
+## E16 – Einstellungsseite über CLI-Batches (2026-10-13)
+Umsetzung von E3:
+- `POST /api/cli/batch` (bis 40 Befehle, `quiet=1` für reine Abfragen) und
+  `GET /api/cli/job?id=`. CliBridge hält 4 Job-Plätze im PSRAM und arbeitet pro loop() einen Befehl ab.
+- Felder: alle Repeater-Prefs außer Bridge/GPS/Powersaving (nicht genutzt, siehe E12). Geschickt
+  werden nur geänderte Felder als `set …`, danach wird alles neu gelesen. Was die CLI ablehnt
+  (z. B. `advert.interval 30`), zeigt die Seite an.
+- `get` mit „Error: unsupported“ → Feld ausgegraut (V4 ohne KCT8103L: `radio.fem.txgain`).
+- Funk- oder Schlüsseländerung → Banner „Neustart nötig“.
+- Regionen: Rohausgabe von `region` plus Aktionen put/remove/allowf/denyf/home und `region save`.
+  `region load` wird bewusst nicht genutzt (friert laut hansemesh die CLI in 1.17.x ein).
+- **Backup** = JSON mit einer Liste offizieller CLI-Befehle (`set …`, `region …`, optional
+  `set prv.key`). **Restore** spielt sie als Batch ein und lässt nur `set …` und `region put/denyf/home/save` zu.
+  Nicht enthalten: Admin-Passwort (die CLI kann es nicht auslesen), WLAN-Zugangsdaten.
+- **Geheimnisse:** `password …` und `set prv.key …` werden im Konsolen-Log, seriell und in der
+  Job-Antwort maskiert. Die CLI wiederholt das Passwort sonst im Klartext („password now: …“).
+
+## E17 – NTP stellt die MeshCore-Uhr (2026-10-13, vorgezogen aus M5)
+`ESP32RTCClock` liest und schreibt die ESP-Systemzeit. Sobald die Station eine IP hat, startet
+SNTP (`pool.ntp.org`, `time.cloudflare.com`, UTC) und stellt damit direkt die Mesh-Uhr. Bei jeder
+Synchronisation (stündlich) wird zusätzlich `rtc_clock.setCurrentTime()` aufgerufen, damit eine
+eventuell angeschlossene externe RTC (DS3231 via AutoDiscover) mitläuft.
+Grund: Laut hansemesh verwirft eine falsche Uhr Adverts und leert die Nachbarliste. Ohne RTC
+startet der ESP sonst bei Mai 2024.

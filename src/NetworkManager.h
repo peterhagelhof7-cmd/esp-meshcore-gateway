@@ -27,6 +27,10 @@ public:
 
   static String sanitizeHostname(const String& name);
 
+  // true genau einmal nach jeder erfolgreichen NTP-Synchronisation
+  // (SNTP startet automatisch, sobald die Station eine IP hat).
+  bool takeTimeSynced();
+
 private:
   void startInstallerAp();
   static void onEvent(WiFiEvent_t event);
@@ -38,6 +42,7 @@ private:
   unsigned long _lastRejoinMs = 0;
   volatile bool _gotIp = false;
   volatile bool _apActive = false;
+  bool _sntpStarted = false;
 };
 
 extern NetworkManager network;
