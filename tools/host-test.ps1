@@ -35,9 +35,12 @@ function Invoke-Test([string]$exe, [string[]]$testArgs) {
     if ($LASTEXITCODE -ne 0) { $script:failed++ }
 }
 
+# gnu++11 wie die Firmware (Arduino-ESP32 2.0.x). -static: sonst lädt Windows ggf.
+# eine fremde libstdc++-6.dll (z. B. aus Git/mingw64) -> ABI-Absturz im Test.
+
 # 1) Firmware-Merkmal (OTA)
 $exe = Join-Path $out 'fw_marker_test.exe'
-& g++ -std=c++17 -O1 -Wall -Wextra -I (Join-Path $root 'src') `
+& g++ -std=gnu++11 -O1 -static -Wall -Wextra -I (Join-Path $root 'src') `
     (Join-Path $root 'test/host/fw_marker_test.cpp') (Join-Path $root 'src/FwMarker.cpp') -o $exe
 if ($LASTEXITCODE -ne 0) { throw 'Compile fw_marker_test fehlgeschlagen' }
 foreach ($e in $envs) {
@@ -53,7 +56,7 @@ if (Test-Path $ruleTest) {
     $exe = Join-Path $out 'rule_engine_test.exe'
     $aj = Join-Path $root '.pio/libdeps/gateway_heltec_v4/ArduinoJson/src'
     if (-not (Test-Path $aj)) { throw "ArduinoJson fehlt ($aj) - einmal mit -Build bauen" }
-    & g++ -std=c++17 -O2 -Wall -Wextra -I (Join-Path $root 'src') -I $aj `
+    & g++ -std=gnu++11 -O2 -static -Wall -Wextra -I (Join-Path $root 'src') -I $aj `
         $ruleTest (Join-Path $root 'src/RuleEngine.cpp') (Join-Path $root 'src/SmJson.cpp') -o $exe
     if ($LASTEXITCODE -ne 0) { throw 'Compile rule_engine_test fehlgeschlagen' }
     Write-Host '== Regel-Engine'

@@ -71,7 +71,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <a href="#status" data-v="status">Status</a>
 <a href="#console" data-v="console">Konsole</a>
 <a href="#channels" data-v="channels">Kanäle</a>
-<a href="#sm" data-v="sm">Sensormeter</a>
+<a href="#sm" data-v="sm">Überwachung</a>
 <a href="#packets" data-v="packets">Pakete</a>
 <a href="#settings" data-v="settings">Einstellungen</a>
 <a href="#wifi" data-v="wifi">System</a>
@@ -224,11 +224,25 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <div class="row"><button type="button" id="srSave">Regel speichern</button><button type="button" class="sec" id="srCancel" hidden>Abbrechen</button><span class="msg" id="srMsg" style="margin:0"></span></div>
 </section>
 
+<section style="margin-bottom:16px">
+<h2>Ping-Check</h2>
+<div class="tbl"><table><thead><tr><th>Bezeichner</th><th>Ziel</th><th>Schwelle</th><th>Status</th><th></th></tr></thead><tbody id="pgBody"></tbody></table></div>
+<p class="hint" id="pgEmpty" hidden>Noch keine Ping-Ziele (max. 5).</p>
+<div class="form" style="margin-top:14px">
+<div class="grp" id="pgTitle">Ping-Ziel hinzufügen</div>
+<label for="pgName">Bezeichner</label><div class="fld"><input id="pgName" maxlength="23" placeholder="z. B. Router"><small>Pflicht, erscheint in der Meldung</small></div>
+<label for="pgHost">Name oder IP</label><div class="fld"><input id="pgHost" maxlength="63" placeholder="10.10.0.1 oder nas.example.de" spellcheck="false"></div>
+<label for="pgThr">Schwellwert (s)</label><div class="fld"><input id="pgThr" type="number" min="10" max="65535" value="60"><small>Antwortet das Ziel länger als so viele Sekunden nicht, geht eine Meldung in den Alarmkanal. Geprüft wird alle 10 s.</small></div>
+<label>Optionen</label><div class="fld"><label class="chk"><input type="checkbox" id="pgEn" checked> aktiv</label></div>
+</div>
+<div class="row"><button type="button" id="pgSave">Ping-Ziel speichern</button><button type="button" class="sec" id="pgCancel" hidden>Abbrechen</button><span class="msg" id="pgMsg" style="margin:0"></span></div>
+</section>
+
 <div class="grid">
 <section>
 <h2>Einstellungen</h2>
 <label class="chk"><input type="checkbox" id="ssEn"> Abfrage und Meldungen aktiv</label>
-<label for="ssCh">Standardkanal (für Regeln ohne eigenen Kanal und Offline-Meldungen)</label>
+<label for="ssCh">Alarmkanal (für Ping-Check, Offline-Meldungen und Regeln ohne eigenen Kanal)</label>
 <select id="ssCh"></select>
 <label for="ssMax">Höchstens Meldungen pro Stunde</label>
 <input id="ssMax" type="number" min="0" max="60">
@@ -238,6 +252,8 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <label for="ssRec">Text Entwarnung</label><input id="ssRec" maxlength="99" spellcheck="false">
 <label for="ssOffT">Text Offline</label><input id="ssOffT" maxlength="99" spellcheck="false">
 <label for="ssOnT">Text wieder Online</label><input id="ssOnT" maxlength="99" spellcheck="false">
+<label for="ssPgD">Text Ping-Alarm</label><input id="ssPgD" maxlength="99" spellcheck="false">
+<label for="ssPgU">Text Ping wieder OK</label><input id="ssPgU" maxlength="99" spellcheck="false">
 <div class="row"><button type="button" id="ssSave">Einstellungen speichern</button><span class="msg" id="ssMsg" style="margin:0"></span></div>
 <p class="hint" id="ssLimit"></p>
 </section>
@@ -650,7 +666,8 @@ $('msgForm').onsubmit=async e=>{
 /* ---------- Sensormeter ---------- */
 // Standardtexte wie in src/SmConfig.cpp (nur als Platzhalter angezeigt; leer = Standard)
 const SM_DEF={alert:'{state} {device}: {metric} {value}{unit} ({op}{threshold}{unit})',
-  recover:'OK {device}: {metric} {value}{unit} wieder normal',offline:'OFFLINE {device} nicht erreichbar',online:'ONLINE {device} wieder erreichbar'};
+  recover:'OK {device}: {metric} {value}{unit} wieder normal',offline:'OFFLINE {device} nicht erreichbar',online:'ONLINE {device} wieder erreichbar',
+  pingDown:'PING-ALARM {device} ({host}) seit {value} s ohne Antwort',pingUp:'PING-OK {device} ({host}) antwortet wieder'};
 let smCfg=null,smSt=null,smEditDev=-1,smEditRule=-1;
 const smLogFeed=makeFeed('/api/sm/log',$('smLog'),300,()=>true);
 const smLogAdd=smLogFeed.add;
@@ -667,8 +684,8 @@ function fillChSelect(sel,withStd,cur){
 }
 function fillRuleChannels(){
   if(!smCfg)return;
-  fillChSelect($('srCh'),'Standardkanal',$('srCh').value||'');
-  fillChSelect($('ssCh'),'(keiner)',smSetDirty?$('ssCh').value:smCfg.settings.defaultChannel);
+  fillChSelect($('srCh'),'Alarmkanal (Standard)',$('srCh').value||'');
+  fillChSelect($('ssCh'),'(keiner – Meldungen gehen verloren)',smSetDirty?$('ssCh').value:smCfg.settings.defaultChannel);
 }
 function ago(s){if(s===null||s===undefined)return'–';if(s<90)return s+' s';if(s<5400)return Math.round(s/60)+' min';return Math.round(s/3600)+' h'}
 function fmtVal(v){return (Math.round(v*10)/10).toString()}
@@ -676,7 +693,8 @@ async function smSave(cfg,msgEl,okText){
   const r=await fetch('/api/sm/save',{method:'POST',body:new URLSearchParams({json:JSON.stringify(cfg)})});
   const j=await r.json().catch(()=>({}));
   if(!r.ok){msgEl.textContent=j.error||('Fehler '+r.status);msgEl.className='msg bad';return false}
-  msgEl.textContent=okText;msgEl.className='msg ok';await smLoad();return true;
+  await smLoad();   // erst neu laden, dann melden (Formular-Reset danach überschreibt sonst neue Eingaben)
+  msgEl.textContent=okText;msgEl.className='msg ok';return true;
 }
 function smCfgForSave(){
   // Passwörter: "***" = unverändert; origIdx sagt dem Gateway, welches alte Passwort gemeint ist.
@@ -741,6 +759,7 @@ function smRender(){
   $('srSave').disabled=smCfg.devices.length===0;
   if(!$('srPath').dataset.keep)fillPaths();
   $('ssLimit').textContent='Gesendet in der letzten Stunde: '+st.limit.used+' von '+st.limit.max+'.';
+  pgRender(st);
 }
 function fillPaths(want){
   const i=parseInt($('srDev').value),s=(smSt&&smSt.devices.find(x=>x.idx===i))||{};
@@ -761,19 +780,20 @@ async function smLoad(){
     if(!smSetDirty){   // bearbeitete, ungespeicherte Felder nicht überschreiben
       $('ssEn').checked=s.enabled;$('ssMax').value=s.maxPerHour;$('ssOff').value=s.offlineAfterFails;
       $('ssAlert').value=s.alertText;$('ssRec').value=s.recoverText;$('ssOffT').value=s.offlineText;$('ssOnT').value=s.onlineText;
+      $('ssPgD').value=s.pingDownText||'';$('ssPgU').value=s.pingUpText||'';
     }
     fillRuleChannels();smRender();
   }catch(e){$('sdMsg').textContent='Laden fehlgeschlagen';$('sdMsg').className='msg bad'}
 }
-$('ssAlert').placeholder=SM_DEF.alert;$('ssRec').placeholder=SM_DEF.recover;$('ssOffT').placeholder=SM_DEF.offline;$('ssOnT').placeholder=SM_DEF.online;
+$('ssAlert').placeholder=SM_DEF.alert;$('ssRec').placeholder=SM_DEF.recover;$('ssOffT').placeholder=SM_DEF.offline;$('ssOnT').placeholder=SM_DEF.online;$('ssPgD').placeholder=SM_DEF.pingDown;$('ssPgU').placeholder=SM_DEF.pingUp;
 $('srText').placeholder='Standard: '+SM_DEF.alert;
 let smSetDirty=false;
-['ssEn','ssCh','ssMax','ssOff','ssAlert','ssRec','ssOffT','ssOnT'].forEach(id=>$(id).addEventListener('input',()=>{smSetDirty=true;$('ssMsg').textContent='ungespeichert';$('ssMsg').className='msg warn'}));
+['ssEn','ssCh','ssMax','ssOff','ssAlert','ssRec','ssOffT','ssOnT','ssPgD','ssPgU'].forEach(id=>$(id).addEventListener('input',()=>{smSetDirty=true;$('ssMsg').textContent='ungespeichert';$('ssMsg').className='msg warn'}));
 $('ssSave').onclick=async()=>{
   const c=smCfgForSave();
   Object.assign(c.settings,{enabled:$('ssEn').checked,defaultChannel:$('ssCh').value,maxPerHour:parseInt($('ssMax').value)||0,
     offlineAfterFails:parseInt($('ssOff').value)||0,alertText:$('ssAlert').value.trim(),recoverText:$('ssRec').value.trim(),
-    offlineText:$('ssOffT').value.trim(),onlineText:$('ssOnT').value.trim()});
+    offlineText:$('ssOffT').value.trim(),onlineText:$('ssOnT').value.trim(),pingDownText:$('ssPgD').value.trim(),pingUpText:$('ssPgU').value.trim()});
   smSetDirty=false;
   if(!await smSave(c,$('ssMsg'),'Gespeichert'))smSetDirty=true;
 };
@@ -799,7 +819,7 @@ $('sdSave').onclick=async()=>{
 function smRuleEdit(i){
   smEditRule=i;const r=smCfg.rules[i];
   $('srDev').value=r.device;fillPaths(r.path);$('srOp').value=r.op;$('srThr').value=r.threshold;$('srHyst').value=r.hysteresis;
-  $('srMin').value=r.minDurationS;$('srRep').value=r.repeatMin;fillChSelect($('srCh'),'Standardkanal',r.channel);$('srText').value=r.text;
+  $('srMin').value=r.minDurationS;$('srRep').value=r.repeatMin;fillChSelect($('srCh'),'Alarmkanal (Standard)',r.channel);$('srText').value=r.text;
   $('srRec').checked=r.notifyRecovery;$('srEn').checked=r.enabled;$('srPath').dataset.keep='1';
   $('smRuleTitle').textContent='Regel bearbeiten';$('srCancel').hidden=false;
 }
@@ -819,6 +839,44 @@ $('srSave').onclick=async()=>{
   const c=smCfgForSave();
   if(smEditRule>=0)c.rules[smEditRule]=r;else{if(c.rules.length>=16){$('srMsg').textContent='Maximal 16 Regeln';$('srMsg').className='msg bad';return}c.rules.push(r)}
   if(await smSave(c,$('srMsg'),smEditRule>=0?'Regel gespeichert':'Regel angelegt'))smRuleReset();
+};
+
+/* ---------- Ping-Check ---------- */
+let pgEdit=-1;
+function pgRender(st){
+  const tb=$('pgBody');tb.innerHTML='';
+  const pings=smCfg.pings||[];
+  pings.forEach((p,i)=>{
+    const s=(st.pings||[]).find(x=>x.idx===i)||{};
+    const tr=document.createElement('tr');
+    const td=(t,cls)=>{const e=document.createElement('td');if(cls)e.className=cls;if(t!==undefined)e.textContent=t;tr.appendChild(e);return e};
+    td(p.name+(p.enabled?'':' (aus)'));
+    td(p.host+(s.ip&&s.ip!==p.host?' ('+s.ip+')':''),'mono');
+    td(p.thresholdS+' s');
+    const z=td();
+    if(!p.enabled)z.textContent='deaktiviert';
+    else if(s.state==='up'){z.textContent='✓ '+s.rttMs+' ms';z.className='ok'}
+    else if(s.state==='down'){z.textContent='ALARM: seit '+ago(s.noReplyS)+' keine Antwort';z.className='bad'}
+    else if(s.state==='failing'){z.textContent='✗ '+(s.error||'keine Antwort')+' ('+ago(s.noReplyS)+')';z.className='warn'}
+    else z.textContent='wartet …';
+    const a=td();
+    [['bearbeiten',()=>{pgEdit=i;$('pgName').value=p.name;$('pgHost').value=p.host;$('pgThr').value=p.thresholdS;$('pgEn').checked=p.enabled;
+        $('pgTitle').textContent='Ping-Ziel bearbeiten: '+p.name;$('pgCancel').hidden=false}],
+     ['löschen',async()=>{if(!confirm('Ping-Ziel '+p.name+' löschen?'))return;const c=smCfgForSave();c.pings.splice(i,1);await smSave(c,$('pgMsg'),'Ping-Ziel gelöscht')}]]
+      .forEach(([t,f])=>{const b=document.createElement('button');b.type='button';b.className='chip';b.textContent=t;b.onclick=f;a.appendChild(b)});
+    tb.appendChild(tr);
+  });
+  $('pgEmpty').hidden=pings.length>0;
+}
+function pgReset(){pgEdit=-1;$('pgName').value=$('pgHost').value='';$('pgThr').value=60;$('pgEn').checked=true;$('pgTitle').textContent='Ping-Ziel hinzufügen';$('pgCancel').hidden=true}
+$('pgCancel').onclick=pgReset;
+$('pgSave').onclick=async()=>{
+  const p={name:$('pgName').value.trim(),host:$('pgHost').value.trim(),thresholdS:parseInt($('pgThr').value)||0,enabled:$('pgEn').checked};
+  if(!p.name){$('pgMsg').textContent='Bezeichner angeben (Pflicht)';$('pgMsg').className='msg bad';return}
+  if(!p.host){$('pgMsg').textContent='Name oder IP angeben';$('pgMsg').className='msg bad';return}
+  const c=smCfgForSave();c.pings=c.pings||[];
+  if(pgEdit>=0)c.pings[pgEdit]=p;else{if(c.pings.length>=5){$('pgMsg').textContent='Maximal 5 Ping-Ziele';$('pgMsg').className='msg bad';return}c.pings.push(p)}
+  if(await smSave(c,$('pgMsg'),pgEdit>=0?'Ping-Ziel gespeichert':'Ping-Ziel angelegt'))pgReset();
 };
 
 /* ---------- CLI-Aufträge (Batch) ---------- */

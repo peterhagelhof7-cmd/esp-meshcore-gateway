@@ -267,7 +267,8 @@ class FakeSm:
     def __init__(self):
         self.cfg = {'settings': {'enabled': True, 'defaultChannel': '', 'maxPerHour': 6, 'offlineAfterFails': 3,
                                  'alertText': '', 'recoverText': '', 'offlineText': '', 'onlineText': ''},
-                    'devices': [], 'rules': []}
+                    'devices': [], 'rules': [], 'pings': []}
+        self.ping_state = []
         self.dev_state = []
         self.rule_state = []
         self.sent = 0
@@ -286,6 +287,14 @@ class FakeSm:
         for i, r in enumerate(rules):
             if not (0 <= r.get('device', -1) < len(devs)): return 'Regel %d: Gerät ungültig' % (i + 1)
             if '.' not in r.get('path', ''): return 'Regel %d: Messwert fehlt' % (i + 1)
+        pings = j.get('pings', [])
+        if len(pings) > 5: return 'Maximal 5 Ping-Ziele'
+        for i, pg in enumerate(pings):
+            if not pg.get('name'): return 'Ping-Ziel %d: Bezeichner fehlt' % (i + 1)
+            if not re.fullmatch(r'[A-Za-z0-9._-]+', pg.get('host', '')): return 'Ping-Ziel %s: Name/IP ungültig' % pg['name']
+            if not (10 <= int(pg.get('thresholdS', 0)) <= 65535): return 'Ping-Ziel %s: Schwellwert 10-65535 s' % pg['name']
+        old_p = {p['host']: s for p, s in zip(self.cfg.get('pings', []), self.ping_state)}
+        self.ping_state = [old_p.get(p['host'], {}) for p in pings]
         # Wie SmPoller::syncConfig: Zustand unveränderter Geräte/Regeln behalten
         dkey = lambda d: (d['host'], d.get('port', 80))
         rkey = lambda r, ds: (dkey(ds[r['device']]), r['path'], r['op'], r['threshold'], r.get('hysteresis', 0), r.get('minDurationS', 0))
@@ -385,8 +394,61 @@ class FakeSm:
                          'error': s.get('error', ''), 'values': s.get('values', [])})
         rules = [{'idx': i, 'state': s['state'], 'value': s['value'], 'lastEvent': s['lastEvent'], 'lastEventAgoS': None}
                  for i, s in enumerate(self.rule_state)]
-        return {'config': c, 'status': {'devices': devs, 'rules': rules,
+        now = time.time()
+        pst = []
+        for i, s in enumerate(self.ping_state):
+            st = 'unknown' if not s.get('checked') else ('down' if s.get('down') else ('up' if s.get('lastOkFlag') else 'failing'))
+            pst.append({'idx': i, 'state': st, 'rttMs': s.get('rtt') if s.get('lastOkFlag') else None,
+                        'noReplyS': int(now - s.get('lastOk', now)) if s.get('checked') and not s.get('lastOkFlag') else None,
+                        'ip': '', 'error': s.get('error', '')})
+        return {'config': c, 'status': {'devices': devs, 'rules': rules, 'pings': pst,
                                         'limit': {'used': self.sent, 'max': self.cfg['settings']['maxPerHour']}}}
+
+
+import subprocess
+
+
+def real_ping(host):
+    """Echter Ping über Windows-ping (1 Paket, 1 s). Rückgabe (ok, rtt_ms, fehler)."""
+    try:
+        # Windows-ping schreibt in der OEM-Codepage (cp850), nicht cp1252
+        out = subprocess.run(['ping', '-n', '1', '-w', '1000', host], capture_output=True, timeout=5).stdout.decode('cp850', 'replace')
+    except Exception as e:
+        return False, None, str(e)[:40]
+    m = re.search(r'(?:Zeit|time)[=<](\d+)\s*ms', out)
+    if m and ('TTL=' in out or 'ttl=' in out):
+        return True, int(m.group(1)), ''
+    return False, None, 'keine Antwort'
+
+
+PING_CHECK_S = 2   # im Mock schneller als die Firmware (10 s), damit der Test kurz bleibt
+
+
+def ping_loop():
+    while True:
+        time.sleep(PING_CHECK_S)
+        with lock:
+            targets = [(i, dict(p)) for i, p in enumerate(smm.cfg.get('pings', []))]
+        for i, p in targets:
+            if not p.get('enabled', True): continue
+            ok, rtt, err = real_ping(p['host'])
+            with lock:
+                if i >= len(smm.ping_state): continue
+                s = smm.ping_state[i]
+                now = time.time()
+                s.setdefault('lastOk', now)
+                s.update(checked=True, lastOkFlag=ok, error=err)
+                if ok:
+                    s['rtt'] = rtt; s['lastOk'] = now
+                    if s.get('down'):
+                        s['down'] = False
+                        smm.emit('', smm.render(smm.cfg['settings'].get('pingUpText') or 'PING-OK {device} ({host}) antwortet wieder',
+                                                p['name'], 'x', None, 0, 0, 'PING-OK').replace('{host}', p['host']))
+                elif not s.get('down') and now - s['lastOk'] >= p['thresholdS']:
+                    s['down'] = True
+                    secs = int(now - s['lastOk'])
+                    tpl = smm.cfg['settings'].get('pingDownText') or 'PING-ALARM {device} ({host}) seit {value} s ohne Antwort'
+                    smm.emit('', smm.render(tpl, p['name'], 'x', secs, 0, 0, 'PING-ALARM').replace('{host}', p['host']))
 
 
 logs['smlog'] = []
@@ -581,4 +643,5 @@ def traffic():
 
 
 threading.Thread(target=traffic, daemon=True).start()
+threading.Thread(target=ping_loop, daemon=True).start()
 ThreadingHTTPServer(('127.0.0.1', PORT), H).serve_forever()

@@ -78,6 +78,31 @@ DevEvent deviceResult(DeviceState& d, bool ok, uint16_t offlineAfterFails, uint3
   return DevEvent::NONE;
 }
 
+PingEvent pingResult(PingState& p, bool ok, uint32_t thresholdS, uint32_t nowMs) {
+  if (!p.started) {
+    p.started = true;
+    p.lastOkMs = nowMs;   // Ausfallzeit zählt ab dem ersten Versuch
+  }
+  if (ok) {
+    p.lastOkMs = nowMs;
+    p.everOk = true;
+    if (p.down) {
+      p.down = false;
+      return PingEvent::UP;
+    }
+    return PingEvent::NONE;
+  }
+  if (!p.down && nowMs - p.lastOkMs >= thresholdS * 1000UL) {
+    p.down = true;
+    return PingEvent::DOWN;
+  }
+  return PingEvent::NONE;
+}
+
+uint32_t pingDownSeconds(const PingState& p, uint32_t nowMs) {
+  return p.started ? (nowMs - p.lastOkMs) / 1000UL : 0;
+}
+
 bool RateLimiter::allow(uint32_t nowMs) {
   if (_max <= 0) return false;
   int used = 0, freeSlot = -1;
@@ -129,6 +154,7 @@ size_t renderTemplate(const char* tpl, const TemplateVars& v, char* out, size_t 
         else if (!strcmp(key, "op")) put(v.op == Op::ABOVE ? ">" : "<");
         else if (!strcmp(key, "threshold")) { fmtNum(num, sizeof(num), v.threshold); put(num); }
         else if (!strcmp(key, "state")) put(v.state ? v.state : "");
+        else if (!strcmp(key, "host")) put(v.host ? v.host : "");
         else known = false;
         if (known) { p = e + 1; continue; }
       }

@@ -1,6 +1,6 @@
 // Host-Test für src/FwMarker.cpp (ohne Hardware, mit g++ gebaut):
 //   tools\host-test.ps1   bzw.
-//   g++ -std=c++17 -O1 -I src test/host/fw_marker_test.cpp src/FwMarker.cpp -o fw_marker_test
+//   g++ -std=gnu++11 -O1 -static -I src test/host/fw_marker_test.cpp src/FwMarker.cpp -o fw_marker_test
 //   fw_marker_test <firmware.bin> <erwartete-projekt-id> <erwartete-version>
 //
 // Prüft den Scanner gegen die ECHTE firmware.bin mit vielen Chunk-Größen

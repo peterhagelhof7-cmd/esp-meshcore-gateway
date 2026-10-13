@@ -378,3 +378,42 @@ Antworten des Users auf die Fragen am Ende von M6:
   brauchen. Restore spielt sie **nach** den Kanälen ein, weil die Regeln per Name auf sie verweisen.
 - **Repo:** privates GitHub-Repo (wie home-central).
 - Version 0.5.1. UI-Test **85/85**, Host-Tests grün, beide Boards bauen.
+
+## E25 – Ping-Check (2026-10-14, Anforderung User, Details autonom entschieden)
+Vorgabe: max. 5 Ziele, Name oder IP als Ziel, Bezeichner Pflicht, Schwellwert in Sekunden,
+bei Überschreitung Nachricht in den Alarmkanal.
+
+**Auslegung (bitte bestätigen):** Der Schwellwert ist die **maximale Ausfallzeit**. Antwortet
+ein Ziel länger als X Sekunden auf keinen Ping, geht *eine* Meldung in den Alarmkanal. Antwortet es wieder,
+folgt eine Entwarnung. Nicht gemeint ist eine Antwortzeit (RTT) in Sekunden; die RTT wird nur angezeigt.
+
+**Umsetzung:**
+- Konfig in der Sensormeter-Konfig (`pings[]`, max. 5, NVS, im Backup): Bezeichner (Pflicht),
+  Name/IP, Schwellwert **10–65535 s** (Standard 60), aktiv.
+- Prüfung **alle 10 s** pro Ziel im Poller-Task (Core 0): **3 ICMP-Echos** im Abstand von 200 ms
+  mit 1 s Timeout über die IDF-API `esp_ping` (`ping/ping_sock.h`). **Eine Antwort genügt.**
+  Hostnamen werden per DNS aufgelöst (`WiFi.hostByName`), die IP erscheint in der UI.
+- Logik `rules::pingResult()` (host-getestet): Die Ausfallzeit zählt ab der letzten Antwort bzw. ab dem
+  ersten Versuch, falls das Ziel seit dem Start nie geantwortet hat. Es gibt genau eine DOWN-Meldung pro
+  Ausfall, Aussetzer unter der Schwelle lösen nichts aus, und die Logik ist millis()-überlaufsicher.
+- **Alarmkanal = Standardkanal** der Überwachung (umbenannt). Es gilt dieselbe Sendebegrenzung
+  (6/h) wie für die Sensormeter-Meldungen.
+- Texte änderbar, Standard: `PING-ALARM {device} ({host}) seit {value} s ohne Antwort` bzw.
+  `PING-OK {device} ({host}) antwortet wieder`. Neuer Platzhalter `{host}`.
+- Ohne eigenes WLAN wird nicht gepingt (wie bei den Sensormetern). Nach der Rückkehr des WLANs
+  starten die Ausfall-Uhren neu, sonst wäre der erste Fehlversuch sofort ein Alarm.
+- Beim Speichern behält ein Ziel mit gleicher Adresse seinen Zustand (kein erneuter Alarm).
+- Der Tab heißt jetzt **„Überwachung“** (Sensormeter + Ping-Check).
+
+**Gefunden beim Testen:**
+- **Produkt:** Die Speichern-Meldung erschien, bevor das Neuladen fertig war. Der anschließende
+  Formular-Reset konnte schnelle Folgeeingaben löschen. Jetzt wird erst neu geladen und dann gemeldet.
+- **Host-Test-Umgebung:** Abstürze bei `-O1`/`-O2` kamen von einer **fremden `libstdc++-6.dll`**
+  (Git/mingw64) zur Laufzeit (ABI-Konflikt mit WinLibs g++ 16). Die Host-Tests werden jetzt **statisch**
+  gelinkt und mit **gnu++11** gebaut, wie die Firmware (Arduino-ESP32 2.0.x).
+- `TemplateVars` ohne Default-Member-Initializer: Unter C++11 wäre die Struktur sonst kein Aggregat mehr.
+
+**Verifikation:** Host-Tests inkl. 11 Ping-Fälle grün. UI-Test **95/95**. Der Mock pingt dabei
+**echt**: das Sensormeter `.148` antwortet in ca. 3 ms, `192.0.2.1` (TEST-NET) nie, und der Alarm kommt
+nach 10 s im Alarmkanal an. **Nicht HW-verifiziert:** `esp_ping` auf dem ESP32.
+Version 0.6.0.

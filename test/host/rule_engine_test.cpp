@@ -99,6 +99,30 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 10; i++) deviceResult(d2, false, 0, i);
     check("Gerät: Schwelle 0 = nie OFFLINE", !d2.offline);
   }
+  // --- Ping-Check (E25): Schwellwert = max. Ausfallzeit in Sekunden ---
+  {
+    PingState p;
+    check("Ping: OK -> nichts", pingResult(p, true, 60, 0) == PingEvent::NONE);
+    check("Ping: Ausfall 50 s -> noch nichts", pingResult(p, false, 60, 50000) == PingEvent::NONE);
+    check("Ping: Ausfall 60 s -> DOWN", pingResult(p, false, 60, 60000) == PingEvent::DOWN && pingDownSeconds(p, 60000) == 60);
+    check("Ping: weiter aus -> kein zweites DOWN", pingResult(p, false, 60, 120000) == PingEvent::NONE);
+    check("Ping: Antwort -> UP", pingResult(p, true, 60, 130000) == PingEvent::UP && pingDownSeconds(p, 130000) == 0);
+    check("Ping: kurzer Aussetzer unter Schwelle -> nichts", pingResult(p, false, 60, 140000) == PingEvent::NONE &&
+                                                             pingResult(p, true, 60, 150000) == PingEvent::NONE);
+    PingState q;   // nie erreichbar seit Start: zählt ab erstem Versuch
+    check("Ping: nie erreichbar, 1. Versuch", pingResult(q, false, 30, 1000) == PingEvent::NONE);
+    check("Ping: nie erreichbar, nach 30 s DOWN", pingResult(q, false, 30, 31000) == PingEvent::DOWN && !q.everOk);
+    PingState w;   // millis()-Überlauf
+    pingResult(w, true, 20, 0xFFFFF000u);
+    check("Ping: Überlauf", pingResult(w, false, 20, 0xFFFFF000u + 20000u) == PingEvent::DOWN);
+    char out[161];
+    TemplateVars tv{"Router", "", 75, true, "s", Op::ABOVE, 60, "PING-ALARM", "10.10.0.1"};
+    renderTemplate("{state} {device} ({host}) seit {value} s nicht erreichbar", tv, out, sizeof(out));
+    check("Ping: Vorlage mit {host}", std::string(out) == "PING-ALARM Router (10.10.0.1) seit 75 s nicht erreichbar", out);
+    TemplateVars tv2{"X", "", 0, false, "", Op::ABOVE, 0, "OK"};   // host fehlt -> leer
+    renderTemplate("[{host}]", tv2, out, sizeof(out));
+    check("Ping: {host} ohne Wert = leer", std::string(out) == "[]", out);
+  }
   // --- Sendebegrenzung ---
   {
     RateLimiter r;

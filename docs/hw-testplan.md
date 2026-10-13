@@ -1,6 +1,6 @@
 # Hardware-Testplan (wenn das Heltec V4 da ist)
 
-Stand 0.5.0 (2026-10-14). Alles bis M6 ist gebaut, host- und mock-getestet. Auf echter Hardware ist
+Stand 0.6.0 (2026-10-14). Alles bis M7 ist gebaut, host- und mock-getestet. Auf echter Hardware ist
 noch nichts geprüft. Reihenfolge so wählen, dass ein Fehler früh auffällt und nichts kaputt geht.
 
 ## 0. Vorbereitung (nur lesen, nichts schreiben)
@@ -56,5 +56,11 @@ noch nichts geprüft. Reihenfolge so wählen, dass ein Fehler früh auffällt un
 - [ ] Gateway-WLAN trennen → **keine** OFFLINE-Flut
 - [ ] Mehr als 6 Meldungen/h provozieren → Rest „unterdrückt“ im Meldungs-Log
 
-## 8. Dauerlauf
+## 8. Ping-Check (M7)
+- [ ] Router/NAS als Ping-Ziel (Schwelle 60 s) → Status ✓ mit ms
+- [ ] Ziel `192.0.2.1`, Schwelle 30 s → nach ca. 30–40 s PING-ALARM im Alarmkanal (App)
+- [ ] Ziel per Hostname (DNS) → IP wird angezeigt
+- [ ] Gerät kurz vom Netz (unter Schwelle) → keine Meldung; länger → Alarm, danach PING-OK
+
+## 9. Dauerlauf
 - [ ] 24 h laufen lassen: freier Heap stabil (Status-Tab), keine Neustarts (Laufzeit), WLAN stabil
