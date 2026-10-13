@@ -83,7 +83,9 @@ async function runCli(page, cmd) {
     const until = async (fn, ms = 6000) => { const s = Date.now(); while (Date.now() - s < ms) { if (await fn()) return true; await sleep(150); } return false; };
     await page.click('nav a[data-v=channels]');
     check('Kanäle: leer + Senden gesperrt', await until(async () => !(await page.$eval('#chEmpty', e => e.hidden)) && await page.$eval('#msgText', e => e.disabled)));
-    // Hashtag mit Großbuchstaben -> wird klein + # vorangestellt
+    check('Kanäle: Scope mit rhein-main vorbelegt', (await page.$eval('#chScope', e => e.value)) === 'rhein-main');
+    // Hashtag mit Großbuchstaben -> wird klein + # vorangestellt (ohne Scope)
+    await page.$eval('#chScope', e => e.value = '');
     await page.select('#chKind', 'hashtag');
     await page.type('#chName', 'Test');
     await page.click('#chAdd');
@@ -105,7 +107,7 @@ async function runCli(page, cmd) {
     check('Kanäle: Schlüsselfeld nur bei privat', await page.$eval('#chKeyBox', e => e.style.display !== 'none'));
     await page.type('#chName', 'sensormeter');
     await page.type('#chKey', '00112233445566778899aabbccddeeff');
-    await page.type('#chScope', 'rhein-main');
+    check('Kanäle: Scope nach Anlegen wieder vorbelegt', (await page.$eval('#chScope', e => e.value)) === 'rhein-main');
     await page.click('#chAdd');
     check('Kanäle: privat angelegt', await until(async () => (await page.$$eval('#chBody tr', r => r.length)) === 2));
     // Public
@@ -165,7 +167,7 @@ async function runCli(page, cmd) {
     await until(async () => (await page.$$eval('#srPath option', o => o.map(x => x.value))).includes('sensor1.temperature'));
     await page.select('#srPath', 'sensor1.temperature');
     await setVal('#srThr', '30');
-    await page.select('#srCh', '1');
+    await page.select('#srCh', 'sensormeter');
     await page.click('#srSave');
     check('SM: Regel ALARM', await until(async () => { const r = await rows('#smRuleBody'); return r.length === 1 && r[0][3].startsWith('ALARM'); }), JSON.stringify(await rows('#smRuleBody')));
     check('SM: Meldung im Log', await until(async () => (await t('#smLog')).includes('sensormeter -> ALARM Heizraum: Temperatur 35°C (>30°C)')), (await t('#smLog')).slice(-160));
@@ -180,10 +182,10 @@ async function runCli(page, cmd) {
     await page.$$eval('#smRuleBody tr', r => r[1].querySelector('button').click());   // Test
     check('SM: Test-Button ohne Kanal -> Fehler', await until(async () => (await t('#srMsg')).includes('kein gültiger Kanal')), await t('#srMsg'));
     // Standardkanal setzen -> Test geht
-    await page.select('#ssCh', '0');
+    await page.select('#ssCh', '#test');
     check('SM: Einstellung als ungespeichert markiert', (await t('#ssMsg')) === 'ungespeichert');
     await sleep(3500);   // ein Aktualisierungszyklus darf die Auswahl nicht zurücksetzen
-    check('SM: ungespeicherte Auswahl bleibt', (await page.$eval('#ssCh', e => e.value)) === '0');
+    check('SM: ungespeicherte Auswahl bleibt', (await page.$eval('#ssCh', e => e.value)) === '#test');
     await page.click('#ssSave');
     await until(async () => (await t('#ssMsg')) === 'Gespeichert');
     await until(async () => (await rows('#smRuleBody')).length === 2);
@@ -207,6 +209,37 @@ async function runCli(page, cmd) {
       const c = await page.evaluate(async () => (await (await fetch('/api/sm')).json()).config);
       return c.devices.length === 1 && c.rules.length === 1 && c.rules[0].device === 0 && c.devices[0].name === 'Heizraum';
     }));
+
+    // Kanal-Zuordnung per Name (E24): Kanal löschen -> Regel zeigt "fehlt",
+    // Kanal (auch an anderer Platznummer) neu anlegen -> Regel funktioniert wieder.
+    await page.click('nav a[data-v=channels]');
+    await until(async () => (await page.$$eval('#chBody tr', r => r.length)) === 3);
+    await page.$$eval('#chBody tr', rows => rows.find(r => r.children[0].textContent === 'sensormeter').querySelectorAll('button.chip')[1].click());
+    await until(async () => (await page.$$eval('#chBody tr', r => r.length)) === 2);
+    await page.click('nav a[data-v=sm]');
+    check('SM: gelöschter Kanal als "fehlt" markiert', await until(async () => (await rows('#smRuleBody'))[0][2] === 'sensormeter (fehlt!)'), JSON.stringify(await rows('#smRuleBody')));
+    await page.$$eval('#smRuleBody tr', r => r[0].querySelector('button').click());   // Test
+    check('SM: Test ohne Kanal -> Fehler', await until(async () => (await t('#srMsg')).includes('kein gültiger Kanal')), await t('#srMsg'));
+    await page.click('nav a[data-v=channels]');
+    await page.select('#chKind', 'hashtag');
+    await page.$eval('#chName', e => e.value = 'platzhalter');   // belegt den alten Platz
+    await page.click('#chAdd');
+    await until(async () => (await page.$$eval('#chBody tr', r => r.length)) === 3);
+    await page.select('#chKind', 'private');
+    await page.$eval('#chName', e => e.value = 'sensormeter');
+    await page.$eval('#chKey', e => e.value = '00112233445566778899aabbccddeeff');
+    await page.click('#chAdd');
+    await until(async () => (await page.$$eval('#chBody tr', r => r.length)) === 4);
+    await page.click('nav a[data-v=sm]');
+    check('SM: Regel findet neu angelegten Kanal per Name', await until(async () => (await rows('#smRuleBody'))[0][2] === 'sensormeter'), JSON.stringify(await rows('#smRuleBody')));
+    await page.$$eval('#smRuleBody tr', r => r[0].querySelector('button').click());
+    check('SM: Test geht wieder in "sensormeter" (nicht in den Platzhalter)', await until(async () => {
+      const log = await t('#smLog'); return log.includes('sensormeter -> TEST Heizraum') && !log.includes('#platzhalter ->');
+    }), (await t('#smLog')).slice(-160));
+    // Platzhalter wieder entfernen (Backup-Test erwartet 3 Kanäle)
+    await page.click('nav a[data-v=channels]');
+    await page.$$eval('#chBody tr', rows => rows.find(r => r.children[0].textContent === '#platzhalter').querySelectorAll('button.chip')[0].click());
+    await until(async () => (await page.$$eval('#chBody tr', r => r.length)) === 3);
   }
 
   // ---------- Einstellungen ----------
@@ -261,6 +294,9 @@ async function runCli(page, cmd) {
   check('Backup: Inhalt', bk.commands.includes('set tx 17') && bk.commands.includes('set radio 869.618,62.5,8,8') &&
         bk.commands.includes('region put rhein-main') && bk.commands.some(c => c.startsWith('set prv.key ')), bk.commands.length + ' Befehle');
   check('Backup: unsupported fem.txgain ausgelassen', !bk.commands.some(c => c.includes('fem.txgain')));
+  check('Backup: Sensormeter-Konfig enthalten (per Kanalname, ohne Passwort)', !!bk.sensormeter && bk.sensormeter.devices.length === 1 &&
+        bk.sensormeter.rules[0].channel === 'sensormeter' && bk.sensormeter.settings.defaultChannel === '#test' && bk.sensormeter.devices[0].pass === '',
+        JSON.stringify(bk.sensormeter && bk.sensormeter.rules));
   check('Backup: Kanäle enthalten', Array.isArray(bk.channels) && bk.channels.length === 3 && bk.channels.some(c => c.name === 'sensormeter' && c.key === 'ABEiM0RVZneImaq7zN3u/w==' && c.scope === 'rhein-main'), JSON.stringify(bk.channels));
 
   // Zustand verstellen, dann Backup einspielen

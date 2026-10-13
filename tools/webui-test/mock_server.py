@@ -265,7 +265,7 @@ class FakeSm:
     """Vereinfachter Nachbau von SmConfig + SmPoller (Regeln ohne Mindestdauer)."""
 
     def __init__(self):
-        self.cfg = {'settings': {'enabled': True, 'defaultChannel': -1, 'maxPerHour': 6, 'offlineAfterFails': 3,
+        self.cfg = {'settings': {'enabled': True, 'defaultChannel': '', 'maxPerHour': 6, 'offlineAfterFails': 3,
                                  'alertText': '', 'recoverText': '', 'offlineText': '', 'onlineText': ''},
                     'devices': [], 'rules': []}
         self.dev_state = []
@@ -306,11 +306,18 @@ class FakeSm:
         with urllib.request.urlopen('http://%s:%d/api/sensors' % (d['host'], d.get('port', 80)), timeout=3) as r:
             return json.loads(r.read())
 
-    def emit(self, ch, text, count=True):
-        ch = ch if ch >= 0 else self.cfg['settings']['defaultChannel']
-        c = chans.ch[ch] if 0 <= ch < chans.MAX else None
-        if not c:
+    @staticmethod
+    def find(name):   # wie channel_store::findByName (Regeln verweisen per Name)
+        return next((i for i, x in enumerate(chans.ch) if x and name and x['name'] == name), -1)
+
+    def emit(self, name, text, count=True):
+        name = name or self.cfg['settings']['defaultChannel']
+        if not name:
             push('smlog', 'X', 'kein Kanal gewählt: ' + text); return
+        ch = self.find(name)
+        c = chans.ch[ch] if ch >= 0 else None
+        if not c:
+            push('smlog', 'X', 'Kanal "%s" existiert nicht: %s' % (name, text)); return
         if count:
             if self.sent >= self.cfg['settings']['maxPerHour']:
                 push('smlog', 'X', 'Sendelimit erreicht, unterdrückt: ' + text); return
@@ -359,8 +366,8 @@ class FakeSm:
     def test(self, i):
         if not (0 <= i < len(self.cfg['rules'])): return 'Regel unbekannt'
         r = self.cfg['rules'][i]
-        ch = r['channel'] if r['channel'] >= 0 else self.cfg['settings']['defaultChannel']
-        if not (0 <= ch < chans.MAX and chans.ch[ch]): return 'kein gültiger Kanal'
+        ch = r.get('channel') or self.cfg['settings']['defaultChannel']
+        if self.find(ch) < 0: return 'kein gültiger Kanal'
         tpl = r.get('text') or self.cfg['settings'].get('alertText') or '{state} {device}: {metric} {value}{unit} ({op}{threshold}{unit})'
         txt = self.render(tpl, self.cfg['devices'][r['device']]['name'], r['path'], self.rule_state[i]['value'], r['op'], r['threshold'], 'TEST')
         if '{state}' not in tpl: txt = 'TEST ' + txt

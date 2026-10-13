@@ -41,6 +41,9 @@ namespace channel_store {
   bool remove(int idx);
   bool setScope(int idx, const char* scope, String& err);
 
+  // Index des Kanals mit genau diesem Namen, -1 = keiner.
+  int findByName(const char* name);
+
   // Für GatewayMesh::searchChannelsByHash (loopTask). Liefert Indizes.
   int findByHash(uint8_t hash, int idx[], int max);
 

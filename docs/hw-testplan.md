@@ -48,7 +48,7 @@ noch nichts geprüft. Reihenfolge so wählen, dass ein Fehler früh auffällt un
 - [ ] OLED-Taste: kurz und lang → nur Seitenwechsel, **kein** Abschalten
 
 ## 7. Sensormeter (M6)
-- [ ] Privaten Kanal „sensormeter“ anlegen, als Standardkanal setzen
+- [ ] Privaten Kanal „sensormeter“ anlegen (Scope rhein-main ist vorbelegt), als Standardkanal setzen
 - [ ] Gerät 10.10.0.148 eintragen → Status ✓, Temperatur und Feuchte sichtbar
 - [ ] Regel Temperatur > (aktueller Wert − 1) → ALARM kommt in der App an
 - [ ] Grenzwert hochsetzen → Entwarnung (Hysterese beachten)

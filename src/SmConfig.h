@@ -33,14 +33,14 @@ struct Rule {
   float hysteresis;
   uint32_t minDurationS;
   uint16_t repeatMin;   // 0 = keine Erinnerung
-  int8_t channel;       // -1 = Standardkanal
+  char channel[32];     // Kanalname, leer = Standardkanal (Name statt Index, E24)
   bool notifyRecovery;
   char text[100];       // leer = Standardvorlage
 };
 
 struct Settings {
   bool enabled;
-  int8_t defaultChannel;      // -1 = keiner
+  char defaultChannel[32];    // Kanalname, leer = keiner
   uint8_t maxPerHour;         // Sendebegrenzung, 0 = nichts senden
   uint8_t offlineAfterFails;  // 0 = nie offline melden
   char alertText[100];

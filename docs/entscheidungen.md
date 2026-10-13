@@ -361,3 +361,20 @@ sowie die tatsächliche Kanalnachricht per Funk.
   stderr-Zeile von pio/g++ als Abbruch wertet.
 - Nach Änderungen an `lib_deps` baut PlatformIO die Build-Ordner neu auf, dann fehlen die
   `firmware.bin` des jeweils anderen Envs. Der UI-Test prüft das jetzt vorab mit klarer Meldung.
+
+## E24 – Nach Rückfrage (2026-10-14): Limit, Scope, Lücken, Repo
+Antworten des Users auf die Fragen am Ende von M6:
+- **Sendebegrenzung 6/h** bestätigt.
+- **Scope „rhein-main“** für den Alarm-Kanal: Beim Anlegen eines Kanals ist das Scope-Feld mit
+  `rhein-main` vorbelegt (änderbar, leer = ohne Scope). Es gibt bewusst keine harte Vorgabe in der
+  Firmware: Ein Scope pro Kanal bleibt wie in der App die richtige Ebene.
+- **Lücke 1 behoben:** Regeln und der Standardkanal verweisen jetzt per **Kanalname** statt per
+  Platznummer (`Rule.channel`, `Settings.defaultChannel` als `char[32]`,
+  `channel_store::findByName`). Ein gelöschter Kanal erscheint in der UI als „Name (fehlt!)“, und
+  es wird nichts gesendet (Log-Eintrag). Legt man ihn mit demselben Namen neu an (auch an anderer
+  Platznummer), greift die Regel wieder. Per UI-Test abgesichert.
+- **Lücke 2 behoben:** Das Backup enthält die Sensormeter-Konfig (`sensormeter`). Geräte-Passwörter
+  sind nicht enthalten, weil die API sie nur maskiert liefert und Sensormeter für `/api/sensors` keins
+  brauchen. Restore spielt sie **nach** den Kanälen ein, weil die Regeln per Name auf sie verweisen.
+- **Repo:** privates GitHub-Repo (wie home-central).
+- Version 0.5.1. UI-Test **85/85**, Host-Tests grün, beide Boards bauen.
