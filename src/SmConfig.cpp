@@ -23,7 +23,6 @@ static uint32_t s_gen = 1;
 static void defaults(Config& c) {
   memset(&c, 0, sizeof(c));
   c.settings.enabled = true;
-  c.settings.defaultChannel = -1;
   c.settings.maxPerHour = 6;
   c.settings.offlineAfterFails = 3;
 }
@@ -48,7 +47,7 @@ static bool parse(const char* json, size_t len, const Config& old, Config& c, St
 
   JsonObject st = doc["settings"];
   c.settings.enabled = st["enabled"] | true;
-  c.settings.defaultChannel = st["defaultChannel"] | -1;
+  cpy(c.settings.defaultChannel, sizeof(c.settings.defaultChannel), st["defaultChannel"] | "");
   c.settings.maxPerHour = constrain((int)(st["maxPerHour"] | 6), 0, 60);
   c.settings.offlineAfterFails = constrain((int)(st["offlineAfterFails"] | 3), 0, 100);
   cpy(c.settings.alertText, sizeof(c.settings.alertText), st["alertText"] | "");
@@ -92,7 +91,7 @@ static bool parse(const char* json, size_t len, const Config& old, Config& c, St
     x.hysteresis = fabsf(r["hysteresis"] | 0.0f);
     x.minDurationS = constrain((long)(r["minDurationS"] | 0), 0L, 86400L);
     x.repeatMin = constrain((int)(r["repeatMin"] | 0), 0, 1440);
-    x.channel = r["channel"] | -1;
+    cpy(x.channel, sizeof(x.channel), r["channel"] | "");
     x.notifyRecovery = r["notifyRecovery"] | true;
     cpy(x.text, sizeof(x.text), r["text"] | "");
     if (x.device < 0 || x.device >= MAX_DEVICES || !c.devices[x.device].used) {

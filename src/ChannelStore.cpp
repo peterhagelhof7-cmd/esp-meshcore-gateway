@@ -185,6 +185,17 @@ bool channel_store::setScope(int idx, const char* scope, String& err) {
   return ok;
 }
 
+int channel_store::findByName(const char* name) {
+  if (!name || !*name) return -1;
+  int idx = -1;
+  xSemaphoreTake(s_lock, portMAX_DELAY);
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    if (s_ch[i].used && strcmp(s_ch[i].name, name) == 0) { idx = i; break; }
+  }
+  xSemaphoreGive(s_lock);
+  return idx;
+}
+
 int channel_store::findByHash(uint8_t hash, int idx[], int max) {
   int n = 0;
   xSemaphoreTake(s_lock, portMAX_DELAY);

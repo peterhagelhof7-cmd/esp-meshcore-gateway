@@ -54,8 +54,9 @@ void logLine(char type, const char* text) {
 }
 
 // Meldung erzeugen und (begrenzt) senden. Aufrufer hält s_lock.
-void emit(int channel, const char* text, bool countLimit) {
-  if (channel < 0) {
+void emit(const char* channelName, const char* text, bool countLimit) {
+  int channel = channel_store::findByName(channelName);
+  if (!channelName || !*channelName) {
     char l[LogBuffer::LINE_LEN];
     snprintf(l, sizeof(l), "kein Kanal gewählt: %s", text);
     logLine('X', l);
@@ -64,7 +65,7 @@ void emit(int channel, const char* text, bool countLimit) {
   GwChannel c;
   if (!channel_store::get(channel, c)) {
     char l[LogBuffer::LINE_LEN];
-    snprintf(l, sizeof(l), "Kanal %d existiert nicht: %s", channel, text);
+    snprintf(l, sizeof(l), "Kanal \"%s\" existiert nicht: %s", channelName, text);
     logLine('X', l);
     return;
   }
@@ -221,7 +222,7 @@ void evaluateDevice(int di, bool ok, uint32_t now) {
                                                  : tplOr(r.text, tplOr(R->cfg.settings.alertText, DEFAULT_ALERT));
     char text[mesh_actions::MAX_TEXT + 1];
     ruleText(r, d, rt, state, tpl, text, sizeof(text));
-    emit(r.channel >= 0 ? r.channel : R->cfg.settings.defaultChannel, text, true);
+    emit(r.channel[0] ? r.channel : R->cfg.settings.defaultChannel, text, true);
   }
 }
 
@@ -311,9 +312,8 @@ bool sm_poller::sendTest(int ruleIdx, String& err) {
     // zu unterscheiden -> dann "TEST " voranstellen.
     char text[mesh_actions::MAX_TEXT + 1];
     snprintf(text, sizeof(text), "%s%s", strstr(tpl, "{state}") ? "" : "TEST ", body);
-    int ch = r.channel >= 0 ? r.channel : R->cfg.settings.defaultChannel;
-    GwChannel c;
-    if (ch < 0 || !channel_store::get(ch, c)) {
+    const char* ch = r.channel[0] ? r.channel : R->cfg.settings.defaultChannel;
+    if (channel_store::findByName(ch) < 0) {
       err = "kein gültiger Kanal";
     } else {
       emit(ch, text, false);

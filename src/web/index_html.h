@@ -182,7 +182,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <label for="chKey" id="chKeyLab">Schlüssel</label>
 <div class="fld" id="chKeyBox"><input id="chKey" maxlength="44" spellcheck="false" placeholder="leer = neuen Zufallsschlüssel erzeugen"><small>16 Byte als Base64 (wie in der App) oder 32 Hex-Zeichen</small></div>
 <label for="chScope">Scope (Region)</label>
-<div class="fld"><input id="chScope" maxlength="30" spellcheck="false" placeholder="leer = ohne Scope"><small>Mit Scope leiten nur Repeater weiter, die diese Region kennen (bis flood.max Hops). Ohne Scope gilt flood.max.unscoped.</small></div>
+<div class="fld"><input id="chScope" maxlength="30" spellcheck="false" value="rhein-main" placeholder="leer = ohne Scope"><small>Vorbelegt mit der lokalen Region rhein-main (Betreiber-Vorgabe). Mit Scope leiten nur Repeater weiter, die diese Region kennen (bis flood.max Hops). Ohne Scope gilt flood.max.unscoped.</small></div>
 </div>
 <div class="row"><button type="button" id="chAdd">Hinzufügen</button><span class="msg" id="chMsg" style="margin:0"></span></div>
 </section>
@@ -314,7 +314,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <input type="file" id="bkFile" accept=".json,application/json">
 <div class="row"><button type="button" id="bkRestore" disabled>Wiederherstellen</button><span class="msg" id="bkMsg" style="margin:0"></span></div>
 <pre class="out" id="bkOut" hidden></pre>
-<p class="hint">Das Backup ist eine Liste offizieller CLI-Befehle (Einstellungen + Regionen) plus die Kanäle des Gateways. Nicht enthalten: Admin-Passwort (per CLI nicht auslesbar), WLAN-Zugangsdaten. Mit Schlüssel ist die Datei geheim zu halten.</p>
+<p class="hint">Das Backup ist eine Liste offizieller CLI-Befehle (Einstellungen + Regionen) plus Kanäle und Sensormeter-Konfiguration des Gateways. Nicht enthalten: Admin-Passwort (per CLI nicht auslesbar), WLAN-Zugangsdaten. Mit Schlüssel ist die Datei geheim zu halten.</p>
 </section>
 </div>
 </div>
@@ -619,7 +619,7 @@ $('chKind').onchange=updKind;updKind();
 $('chAdd').onclick=async()=>{
   try{
     await postForm('/api/channels',{action:'add',kind:$('chKind').value,name:$('chName').value.trim(),key:$('chKey').value.trim(),scope:$('chScope').value.trim()});
-    $('chName').value=$('chKey').value=$('chScope').value='';
+    $('chName').value=$('chKey').value='';$('chScope').value='rhein-main';
     $('chMsg').textContent='Kanal angelegt';$('chMsg').className='msg ok';loadChannels();
   }catch(e){$('chMsg').textContent=e.message;$('chMsg').className='msg bad'}
 };
@@ -655,16 +655,19 @@ let smCfg=null,smSt=null,smEditDev=-1,smEditRule=-1;
 const smLogFeed=makeFeed('/api/sm/log',$('smLog'),300,()=>true);
 const smLogAdd=smLogFeed.add;
 smLogFeed.add=(cls,text,ts)=>smLogAdd(cls==='A'?'T':(cls==='X'?'F':'s'),text,ts);
-function chName(i){if(i<0)return'Standard';const c=channels.find(x=>x.idx===i);return c?c.name:'(Kanal '+i+' fehlt)'}
+// Regeln verweisen per Kanal-NAME (nicht Platznummer) auf Kanäle, E24.
+function chName(n){if(!n)return'Standard';return channels.some(x=>x.name===n)?n:n+' (fehlt!)'}
 function fillChSelect(sel,withStd,cur){
   sel.innerHTML='';
-  if(withStd){const o=document.createElement('option');o.value='-1';o.textContent=withStd;sel.appendChild(o)}
-  channels.forEach(c=>{const o=document.createElement('option');o.value=c.idx;o.textContent=c.name;sel.appendChild(o)});
-  sel.value=String(cur);if(sel.selectedIndex<0)sel.value='-1';
+  if(withStd){const o=document.createElement('option');o.value='';o.textContent=withStd;sel.appendChild(o)}
+  const names=channels.map(c=>c.name);
+  if(cur&&!names.includes(cur))names.push(cur);   // gelöschter Kanal bleibt sichtbar
+  names.forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=channels.some(c=>c.name===n)?n:n+' (fehlt!)';sel.appendChild(o)});
+  sel.value=cur||'';if(sel.selectedIndex<0)sel.value='';
 }
 function fillRuleChannels(){
   if(!smCfg)return;
-  fillChSelect($('srCh'),'Standardkanal',$('srCh').value||-1);
+  fillChSelect($('srCh'),'Standardkanal',$('srCh').value||'');
   fillChSelect($('ssCh'),'(keiner)',smSetDirty?$('ssCh').value:smCfg.settings.defaultChannel);
 }
 function ago(s){if(s===null||s===undefined)return'–';if(s<90)return s+' s';if(s<5400)return Math.round(s/60)+' min';return Math.round(s/3600)+' h'}
@@ -768,7 +771,7 @@ let smSetDirty=false;
 ['ssEn','ssCh','ssMax','ssOff','ssAlert','ssRec','ssOffT','ssOnT'].forEach(id=>$(id).addEventListener('input',()=>{smSetDirty=true;$('ssMsg').textContent='ungespeichert';$('ssMsg').className='msg warn'}));
 $('ssSave').onclick=async()=>{
   const c=smCfgForSave();
-  Object.assign(c.settings,{enabled:$('ssEn').checked,defaultChannel:parseInt($('ssCh').value),maxPerHour:parseInt($('ssMax').value)||0,
+  Object.assign(c.settings,{enabled:$('ssEn').checked,defaultChannel:$('ssCh').value,maxPerHour:parseInt($('ssMax').value)||0,
     offlineAfterFails:parseInt($('ssOff').value)||0,alertText:$('ssAlert').value.trim(),recoverText:$('ssRec').value.trim(),
     offlineText:$('ssOffT').value.trim(),onlineText:$('ssOnT').value.trim()});
   smSetDirty=false;
@@ -796,12 +799,12 @@ $('sdSave').onclick=async()=>{
 function smRuleEdit(i){
   smEditRule=i;const r=smCfg.rules[i];
   $('srDev').value=r.device;fillPaths(r.path);$('srOp').value=r.op;$('srThr').value=r.threshold;$('srHyst').value=r.hysteresis;
-  $('srMin').value=r.minDurationS;$('srRep').value=r.repeatMin;$('srCh').value=r.channel;$('srText').value=r.text;
+  $('srMin').value=r.minDurationS;$('srRep').value=r.repeatMin;fillChSelect($('srCh'),'Standardkanal',r.channel);$('srText').value=r.text;
   $('srRec').checked=r.notifyRecovery;$('srEn').checked=r.enabled;$('srPath').dataset.keep='1';
   $('smRuleTitle').textContent='Regel bearbeiten';$('srCancel').hidden=false;
 }
 function smRuleReset(){
-  smEditRule=-1;$('srThr').value='';$('srHyst').value='0.5';$('srMin').value=0;$('srRep').value=0;$('srCh').value='-1';$('srText').value='';
+  smEditRule=-1;$('srThr').value='';$('srHyst').value='0.5';$('srMin').value=0;$('srRep').value=0;$('srCh').value='';$('srText').value='';
   $('srRec').checked=$('srEn').checked=true;delete $('srPath').dataset.keep;$('smRuleTitle').textContent='Regel hinzufügen';$('srCancel').hidden=true;fillPaths('');
 }
 $('srCancel').onclick=smRuleReset;
@@ -812,7 +815,7 @@ $('srSave').onclick=async()=>{
   if(isNaN(thr)){$('srMsg').textContent='Grenzwert angeben';$('srMsg').className='msg bad';return}
   const r={device:parseInt($('srDev').value),path:$('srPath').value,op:parseInt($('srOp').value),threshold:thr,
     hysteresis:Math.abs(parseFloat($('srHyst').value)||0),minDurationS:parseInt($('srMin').value)||0,repeatMin:parseInt($('srRep').value)||0,
-    channel:parseInt($('srCh').value),notifyRecovery:$('srRec').checked,text:$('srText').value.trim(),enabled:$('srEn').checked};
+    channel:$('srCh').value,notifyRecovery:$('srRec').checked,text:$('srText').value.trim(),enabled:$('srEn').checked};
   const c=smCfgForSave();
   if(smEditRule>=0)c.rules[smEditRule]=r;else{if(c.rules.length>=16){$('srMsg').textContent='Maximal 16 Regeln';$('srMsg').className='msg bad';return}c.rules.push(r)}
   if(await smSave(c,$('srMsg'),smEditRule>=0?'Regel gespeichert':'Regel angelegt'))smRuleReset();
@@ -1087,8 +1090,12 @@ $('bkDown').onclick=async()=>{
     const st=await (await fetch('/api/status',{cache:'no-store'})).json();
     const chs=(await (await fetch('/api/channels',{cache:'no-store'})).json()).channels
       .map(c=>({kind:c.kind,name:c.name,key:c.kind==='private'?c.key_b64:'',scope:c.scope}));
+    // Sensormeter-Konfig (E24). Geräte-Passwörter liefert die API nur maskiert ->
+    // nicht sichern (Sensormeter brauchen für /api/sensors ohnehin keinen Login).
+    const smc=(await (await fetch('/api/sm',{cache:'no-store'})).json()).config;
+    smc.devices.forEach(d=>{if(d.pass==='***')d.pass=''});
     const file={format:'meshcore-gateway-backup',version:1,created:new Date().toISOString(),
-      node:st.node.name,pubkey:st.node.pubkey,meshcore:st.node.firmware,gateway:st.gateway.version,commands:cmds,channels:chs};
+      node:st.node.name,pubkey:st.node.pubkey,meshcore:st.node.firmware,gateway:st.gateway.version,commands:cmds,channels:chs,sensormeter:smc};
     const a=document.createElement('a');
     a.href=URL.createObjectURL(new Blob([JSON.stringify(file,null,2)],{type:'application/json'}));
     a.download='meshcore-gw-'+st.node.name.replace(/[^A-Za-z0-9_-]+/g,'_')+'-'+file.created.slice(0,10)+'.json';
@@ -1096,7 +1103,7 @@ $('bkDown').onclick=async()=>{
     $('bkMsg').textContent=cmds.length+' Befehle gesichert'+(withKey?' (mit Schlüssel!)':'');$('bkMsg').className='msg ok';
   }catch(e){$('bkMsg').textContent='Backup fehlgeschlagen: '+e.message;$('bkMsg').className='msg bad'}
 };
-let bkCmds=null,bkChannels=[];
+let bkCmds=null,bkChannels=[],bkSm=null;
 $('bkFile').onchange=async e=>{
   bkCmds=null;$('bkRestore').disabled=true;$('bkOut').hidden=true;
   const f=e.target.files[0];if(!f)return;
@@ -1107,9 +1114,11 @@ $('bkFile').onchange=async e=>{
     const bad=j.commands.filter(c=>typeof c!=='string'||!allowed.test(c));
     if(bad.length)throw new Error('unerwartete Befehle: '+bad.slice(0,3).join(', '));
     bkCmds=j.commands;bkChannels=Array.isArray(j.channels)?j.channels:[];
+    bkSm=(j.sensormeter&&Array.isArray(j.sensormeter.devices)&&Array.isArray(j.sensormeter.rules))?j.sensormeter:null;
     $('bkOut').hidden=false;
     $('bkOut').textContent='Backup von '+j.node+' ('+j.created+')\n\n'+bkCmds.map(c=>c.startsWith('set prv.key ')?'set prv.key ••••••••':c).join('\n')+
-      (bkChannels.length?'\n\nKanäle: '+bkChannels.map(c=>c.name+(c.scope?' ['+c.scope+']':'')).join(', '):'');
+      (bkChannels.length?'\n\nKanäle: '+bkChannels.map(c=>c.name+(c.scope?' ['+c.scope+']':'')).join(', '):'')+
+      (bkSm?'\nSensormeter: '+bkSm.devices.length+' Geräte, '+bkSm.rules.length+' Regeln':'');
     $('bkRestore').disabled=false;$('bkMsg').textContent=bkCmds.length+' Befehle bereit';$('bkMsg').className='msg';
   }catch(err){$('bkMsg').textContent='Datei ungültig: '+err.message;$('bkMsg').className='msg bad'}
 };
@@ -1126,6 +1135,10 @@ $('bkRestore').onclick=async()=>{
     for(const c of bkChannels){   // vorhandene Kanäle (gleicher Schlüssel) werden übersprungen
       try{await postForm('/api/channels',{action:'add',kind:c.kind,name:c.name,key:c.key||'',scope:c.scope||''})}
       catch(e){if(!/existiert schon/.test(e.message))bad++}
+    }
+    if(bkSm){   // nach den Kanälen: Regeln verweisen per Name auf sie
+      const r=await fetch('/api/sm/save',{method:'POST',body:new URLSearchParams({json:JSON.stringify(bkSm)})});
+      if(!r.ok)bad++;
     }
     loadChannels();
     $('bkMsg').textContent=bad?bad+' Befehl(e) abgelehnt':'Eingespielt';$('bkMsg').className='msg '+(bad?'bad':'ok');
