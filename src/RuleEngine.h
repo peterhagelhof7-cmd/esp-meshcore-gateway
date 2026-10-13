@@ -44,6 +44,20 @@ struct DeviceState {
 enum class DevEvent : uint8_t { NONE, OFFLINE, ONLINE };
 DevEvent deviceResult(DeviceState& d, bool ok, uint16_t offlineAfterFails, uint32_t nowMs);
 
+// Ping-Check (E25): Ziel gilt als ausgefallen, wenn es länger als thresholdS
+// keine Antwort gab. Gezählt ab der letzten Antwort bzw. ab dem ersten
+// Prüfversuch, falls es seit dem Start nie geantwortet hat.
+struct PingState {
+  bool started = false;
+  uint32_t lastOkMs = 0;     // bzw. Startzeitpunkt, solange noch nie OK
+  bool everOk = false;
+  bool down = false;         // Alarm gemeldet
+};
+enum class PingEvent : uint8_t { NONE, DOWN, UP };
+PingEvent pingResult(PingState& p, bool ok, uint32_t thresholdS, uint32_t nowMs);
+// Sekunden ohne Antwort (für Meldungstext/Anzeige)
+uint32_t pingDownSeconds(const PingState& p, uint32_t nowMs);
+
 // Sendebegrenzung: höchstens maxPerHour Meldungen in einem gleitenden
 // 60-Minuten-Fenster (Funkkanal schonen, Duty Cycle 10 %).
 class RateLimiter {
@@ -58,7 +72,7 @@ private:
   int _max = 6;
 };
 
-// Textvorlage füllen: {device} {metric} {value} {unit} {op} {threshold} {state}
+// Textvorlage füllen: {device} {metric} {value} {unit} {op} {threshold} {state} {host}
 struct TemplateVars {
   const char* device;
   const char* metric;
@@ -68,6 +82,7 @@ struct TemplateVars {
   Op op;
   float threshold;
   const char* state;   // z. B. "ALARM", "OK", "ERINNERUNG"
+  const char* host;    // nur Ping-Check (fehlt bei Aggregat-Init -> nullptr)
 };
 size_t renderTemplate(const char* tpl, const TemplateVars& v, char* out, size_t outLen);
 

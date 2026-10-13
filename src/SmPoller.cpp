@@ -3,6 +3,8 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
+#include <ping/ping_sock.h>
+#include <lwip/ip_addr.h>
 #include <new>
 
 #include "ChannelStore.h"
@@ -37,11 +39,22 @@ struct RuleRuntime {
   char lastEvent[12] = {0};
 };
 
+struct PingRuntime {
+  rules::PingState st;
+  uint32_t lastCheckMs = 0;
+  bool checked = false;
+  bool lastOk = false;
+  uint32_t rttMs = 0;
+  char ip[16] = {0};
+  char error[48] = {0};
+};
+
 struct Runtime {
   Config cfg;
   uint32_t gen = 0;
   DevRuntime dev[MAX_DEVICES];
   RuleRuntime rule[MAX_RULES];
+  PingRuntime ping[MAX_PINGS];
   rules::RateLimiter limiter;
   volatile bool pollFlag[MAX_DEVICES];
 };
@@ -113,9 +126,11 @@ void syncConfig() {
   static Config oldCfg;            // statisch: ca. 5 KB, nicht auf den Task-Stack
   static DevRuntime oldDev[MAX_DEVICES];
   static RuleRuntime oldRule[MAX_RULES];
+  static PingRuntime oldPing[MAX_PINGS];
   oldCfg = R->cfg;
   memcpy(oldDev, R->dev, sizeof(oldDev));
   memcpy(oldRule, R->rule, sizeof(oldRule));
+  memcpy(oldPing, R->ping, sizeof(oldPing));
 
   R->gen = sm::copy(R->cfg);
   int keptDev = 0, keptRule = 0;
@@ -137,6 +152,14 @@ void syncConfig() {
         keptRule++;
         break;
       }
+    }
+  }
+  // Ping-Ziel mit gleicher Adresse behält seinen Zustand (kein erneuter Alarm)
+  for (int i = 0; i < MAX_PINGS; i++) {
+    R->ping[i] = PingRuntime();
+    if (!R->cfg.pings[i].used) continue;
+    for (int j = 0; j < MAX_PINGS; j++) {
+      if (oldCfg.pings[j].used && !strcmp(oldCfg.pings[j].host, R->cfg.pings[i].host)) { R->ping[i] = oldPing[j]; break; }
     }
   }
   R->limiter.setMaxPerHour(R->cfg.settings.maxPerHour);
@@ -226,6 +249,131 @@ void evaluateDevice(int di, bool ok, uint32_t now) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Ping-Check (E25)
+// ---------------------------------------------------------------------------
+
+struct PingCtx {
+  SemaphoreHandle_t done;
+  uint32_t replies;
+  uint32_t bestRtt;
+};
+
+void onPingSuccess(esp_ping_handle_t hdl, void* args) {
+  PingCtx* c = (PingCtx*)args;
+  uint32_t t = 0;
+  esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &t, sizeof(t));
+  if (c->replies == 0 || t < c->bestRtt) c->bestRtt = t;
+  c->replies++;
+}
+void onPingEnd(esp_ping_handle_t hdl, void* args) {
+  xSemaphoreGive(((PingCtx*)args)->done);
+}
+
+// Blockiert bis ca. 1,5 s (3 Pakete à 200 ms Abstand, 1 s Timeout). true =
+// mindestens eine Antwort. Läuft ohne gehaltenen Mutex im Poller-Task.
+bool pingHost(const char* host, uint32_t& rttMs, char* ipOut, size_t ipLen, char* err, size_t errLen) {
+  IPAddress ip;
+  if (!ip.fromString(host)) {
+    if (!WiFi.hostByName(host, ip) || ip == IPAddress(0, 0, 0, 0)) {
+      snprintf(err, errLen, "Name nicht auflösbar");
+      return false;
+    }
+  }
+  snprintf(ipOut, ipLen, "%s", ip.toString().c_str());
+
+  esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
+  cfg.count = 3;
+  cfg.interval_ms = 200;
+  cfg.timeout_ms = 1000;
+  cfg.task_stack_size = 3072;
+  IP_ADDR4(&cfg.target_addr, ip[0], ip[1], ip[2], ip[3]);
+
+  PingCtx ctx;
+  ctx.done = xSemaphoreCreateBinary();
+  ctx.replies = 0;
+  ctx.bestRtt = 0;
+  if (!ctx.done) { snprintf(err, errLen, "kein Speicher"); return false; }
+
+  esp_ping_callbacks_t cbs = {};
+  cbs.cb_args = &ctx;
+  cbs.on_ping_success = onPingSuccess;
+  cbs.on_ping_end = onPingEnd;
+  esp_ping_handle_t h = nullptr;
+  if (esp_ping_new_session(&cfg, &cbs, &h) != ESP_OK) {
+    vSemaphoreDelete(ctx.done);
+    snprintf(err, errLen, "Ping-Sitzung fehlgeschlagen");
+    return false;
+  }
+  esp_ping_start(h);
+  bool ended = xSemaphoreTake(ctx.done, pdMS_TO_TICKS(5000)) == pdTRUE;
+  esp_ping_stop(h);
+  esp_ping_delete_session(h);
+  vSemaphoreDelete(ctx.done);
+  if (!ended) { snprintf(err, errLen, "Ping hängt"); return false; }
+  if (ctx.replies == 0) { snprintf(err, errLen, "keine Antwort"); return false; }
+  rttMs = ctx.bestRtt;
+  err[0] = 0;
+  return true;
+}
+
+void evaluatePing(int pi, bool ok, uint32_t now) {
+  // Aufrufer hält s_lock
+  const PingTarget& t = R->cfg.pings[pi];
+  PingRuntime& pr = R->ping[pi];
+  rules::PingEvent e = rules::pingResult(pr.st, ok, t.thresholdS, now);
+  if (e == rules::PingEvent::NONE) return;
+  bool down = e == rules::PingEvent::DOWN;
+  rules::TemplateVars v{t.name, "", (float)rules::pingDownSeconds(pr.st, now), down, "s",
+                        rules::Op::ABOVE, (float)t.thresholdS, down ? "PING-ALARM" : "PING-OK", t.host};
+  const char* tpl = down ? tplOr(R->cfg.settings.pingDownText, DEFAULT_PING_DOWN)
+                         : tplOr(R->cfg.settings.pingUpText, DEFAULT_PING_UP);
+  char text[mesh_actions::MAX_TEXT + 1];
+  rules::renderTemplate(tpl, v, text, sizeof(text));
+  emit(R->cfg.settings.defaultChannel, text, true);   // Alarmkanal = Standardkanal
+}
+
+void pingCycle() {
+  for (int pi = 0; pi < MAX_PINGS; pi++) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    PingTarget t = R->cfg.pings[pi];
+    uint32_t now = millis();
+    bool due = t.used && t.enabled && (!R->ping[pi].checked || now - R->ping[pi].lastCheckMs >= PING_INTERVAL_S * 1000UL);
+    uint32_t gen = R->gen;
+    xSemaphoreGive(s_lock);
+    if (!due) continue;
+
+    uint32_t rtt = 0;
+    char ip[16] = {0}, err[48] = {0};
+    bool ok = pingHost(t.host, rtt, ip, sizeof(ip), err, sizeof(err));
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (R->gen == gen) {
+      PingRuntime& pr = R->ping[pi];
+      now = millis();
+      pr.checked = true;
+      pr.lastCheckMs = now;
+      pr.lastOk = ok;
+      if (ok) pr.rttMs = rtt;
+      if (ip[0]) strlcpy(pr.ip, ip, sizeof(pr.ip));
+      strlcpy(pr.error, err, sizeof(pr.error));
+      evaluatePing(pi, ok, now);
+    }
+    xSemaphoreGive(s_lock);
+  }
+}
+
+// Nach einem WLAN-Ausfall des GATEWAYS die Ping-Uhren neu ansetzen: sonst wäre
+// die letzte Antwort "uralt" und der erste Fehlversuch sofort ein Alarm.
+void rebasePings() {
+  xSemaphoreTake(s_lock, portMAX_DELAY);
+  uint32_t now = millis();
+  for (int i = 0; i < MAX_PINGS; i++) {
+    if (!R->ping[i].st.down) R->ping[i].st.lastOkMs = now;
+  }
+  xSemaphoreGive(s_lock);
+}
+
 void task(void*) {
   static SmValue vals[MAX_VALUES];
   for (;;) {
@@ -238,7 +386,15 @@ void task(void*) {
     // Ohne eigenes WLAN gar nicht abfragen: sonst würde jedes Sensormeter als
     // "nicht erreichbar" gezählt und per Funk (geht ja weiter) gemeldet,
     // obwohl das Gateway selbst das Problem ist.
-    if (network.mode() != NetworkManager::Mode::STATION) continue;
+    static bool wifiWasDown = false;
+    if (network.mode() != NetworkManager::Mode::STATION) {
+      wifiWasDown = true;
+      continue;
+    }
+    if (wifiWasDown) {
+      wifiWasDown = false;
+      rebasePings();
+    }
 
     for (int di = 0; di < MAX_DEVICES; di++) {
       xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -274,6 +430,8 @@ void task(void*) {
       }
       xSemaphoreGive(s_lock);
     }
+
+    pingCycle();
   }
 }
 
@@ -378,6 +536,23 @@ void sm_poller::statusJson(String& out) {
     out += ",\"value\":" + (r.st.hasValue ? String(r.st.lastValue, 2) : String("null"));
     out += ",\"lastEvent\":\"" + String(r.lastEvent) + "\"";
     out += ",\"lastEventAgoS\":" + (r.lastEventMs ? String((now - r.lastEventMs) / 1000) : String("null")) + "}";
+  }
+  out += "],\"pings\":[";
+  first = true;
+  for (int i = 0; i < MAX_PINGS; i++) {
+    if (!R->cfg.pings[i].used) continue;
+    const PingRuntime& p = R->ping[i];
+    if (!first) out += ',';
+    first = false;
+    const char* st = !p.checked ? "unknown" : (p.st.down ? "down" : (p.lastOk ? "up" : "failing"));
+    out += "{\"idx\":" + String(i) + ",\"state\":\"" + st + "\"";
+    out += ",\"rttMs\":" + (p.checked && p.lastOk ? String(p.rttMs) : String("null"));
+    out += ",\"noReplyS\":" + (p.checked && !p.lastOk ? String(rules::pingDownSeconds(p.st, now)) : String("null"));
+    out += ",\"ip\":\"";
+    esc(out, p.ip);
+    out += "\",\"error\":\"";
+    esc(out, p.error);
+    out += "\"}";
   }
   out += "],\"limit\":{\"used\":" + String(R->limiter.usedInWindow(now)) + ",\"max\":" + String(R->cfg.settings.maxPerHour) + "}}";
   xSemaphoreGive(s_lock);

@@ -10,6 +10,8 @@ namespace sm {
 
 static const int MAX_DEVICES = 8;
 static const int MAX_RULES = 16;
+static const int MAX_PINGS = 5;
+static const uint16_t PING_INTERVAL_S = 10;   // Prüfabstand je Ziel
 
 struct Device {
   bool used;
@@ -38,6 +40,16 @@ struct Rule {
   char text[100];       // leer = Standardvorlage
 };
 
+// Ping-Check (E25): Ziel antwortet länger als thresholdS nicht -> Meldung in
+// den Alarmkanal (= Standardkanal), bei Rückkehr Entwarnung.
+struct PingTarget {
+  bool used;
+  bool enabled;
+  char name[24];        // Bezeichner (Pflicht)
+  char host[64];        // IP oder Hostname
+  uint16_t thresholdS;  // max. Ausfallzeit, 10..86400 (uint16: bis 18 h)
+};
+
 struct Settings {
   bool enabled;
   char defaultChannel[32];    // Kanalname, leer = keiner
@@ -47,12 +59,15 @@ struct Settings {
   char recoverText[100];
   char offlineText[100];
   char onlineText[100];
+  char pingDownText[100];
+  char pingUpText[100];
 };
 
 struct Config {
   Settings settings;
   Device devices[MAX_DEVICES];
   Rule rules[MAX_RULES];
+  PingTarget pings[MAX_PINGS];
 };
 
 void begin();
@@ -71,5 +86,7 @@ extern const char* DEFAULT_ALERT;
 extern const char* DEFAULT_RECOVER;
 extern const char* DEFAULT_OFFLINE;
 extern const char* DEFAULT_ONLINE;
+extern const char* DEFAULT_PING_DOWN;
+extern const char* DEFAULT_PING_UP;
 
 }  // namespace sm

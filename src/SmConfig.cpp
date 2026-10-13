@@ -12,6 +12,8 @@ const char* DEFAULT_ALERT = "{state} {device}: {metric} {value}{unit} ({op}{thre
 const char* DEFAULT_RECOVER = "OK {device}: {metric} {value}{unit} wieder normal";
 const char* DEFAULT_OFFLINE = "OFFLINE {device} nicht erreichbar";
 const char* DEFAULT_ONLINE = "ONLINE {device} wieder erreichbar";
+const char* DEFAULT_PING_DOWN = "PING-ALARM {device} ({host}) seit {value} s ohne Antwort";
+const char* DEFAULT_PING_UP = "PING-OK {device} ({host}) antwortet wieder";
 
 static const char* NVS_NS = "gw";
 static const char* NVS_KEY = "smcfg";
@@ -54,6 +56,8 @@ static bool parse(const char* json, size_t len, const Config& old, Config& c, St
   cpy(c.settings.recoverText, sizeof(c.settings.recoverText), st["recoverText"] | "");
   cpy(c.settings.offlineText, sizeof(c.settings.offlineText), st["offlineText"] | "");
   cpy(c.settings.onlineText, sizeof(c.settings.onlineText), st["onlineText"] | "");
+  cpy(c.settings.pingDownText, sizeof(c.settings.pingDownText), st["pingDownText"] | "");
+  cpy(c.settings.pingUpText, sizeof(c.settings.pingUpText), st["pingUpText"] | "");
 
   JsonArray devs = doc["devices"];
   if (devs.size() > MAX_DEVICES) { err = "Maximal 8 Geräte"; return false; }
@@ -101,6 +105,25 @@ static bool parse(const char* json, size_t len, const Config& old, Config& c, St
     if (isnan(x.threshold)) { err = "Regel " + String(i + 1) + ": Grenzwert ungültig"; return false; }
     i++;
   }
+
+  JsonArray pings = doc["pings"];
+  if (pings.size() > MAX_PINGS) { err = "Maximal 5 Ping-Ziele"; return false; }
+  i = 0;
+  for (JsonObject pg : pings) {
+    PingTarget& x = c.pings[i];
+    x.used = true;
+    x.enabled = pg["enabled"] | true;
+    cpy(x.name, sizeof(x.name), pg["name"] | "");
+    cpy(x.host, sizeof(x.host), pg["host"] | "");
+    long thr = pg["thresholdS"] | 60L;
+    if (!x.name[0]) { err = "Ping-Ziel " + String(i + 1) + ": Bezeichner fehlt"; return false; }
+    if (!validHost(x.host)) { err = String("Ping-Ziel ") + x.name + ": Name/IP ungültig"; return false; }
+    if (thr < PING_INTERVAL_S || thr > 65535) {
+      err = String("Ping-Ziel ") + x.name + ": Schwellwert " + PING_INTERVAL_S + "-65535 s"; return false;
+    }
+    x.thresholdS = (uint16_t)thr;
+    i++;
+  }
   return true;
 }
 
@@ -115,6 +138,8 @@ static void serialize(const Config& c, String& out, bool maskPass) {
   st["recoverText"] = c.settings.recoverText;
   st["offlineText"] = c.settings.offlineText;
   st["onlineText"] = c.settings.onlineText;
+  st["pingDownText"] = c.settings.pingDownText;
+  st["pingUpText"] = c.settings.pingUpText;
   JsonArray devs = doc["devices"].to<JsonArray>();
   for (int i = 0; i < MAX_DEVICES; i++) {
     const Device& x = c.devices[i];
@@ -145,6 +170,16 @@ static void serialize(const Config& c, String& out, bool maskPass) {
     r["channel"] = x.channel;
     r["notifyRecovery"] = x.notifyRecovery;
     r["text"] = x.text;
+  }
+  JsonArray pings = doc["pings"].to<JsonArray>();
+  for (int i = 0; i < MAX_PINGS; i++) {
+    const PingTarget& x = c.pings[i];
+    if (!x.used) continue;
+    JsonObject p = pings.add<JsonObject>();
+    p["enabled"] = x.enabled;
+    p["name"] = x.name;
+    p["host"] = x.host;
+    p["thresholdS"] = x.thresholdS;
   }
   serializeJson(doc, out);
 }
