@@ -15,6 +15,8 @@
 #include "NetworkManager.h"
 #include "OtaUpdate.h"
 #include "Profile.h"
+#include "SmConfig.h"
+#include "SmPoller.h"
 #include "web/index_html.h"
 
 static AsyncWebServer server(80);
@@ -403,6 +405,51 @@ static void handleChannelSend(AsyncWebServerRequest* req) {
   req->send(200, "application/json", "{\"ok\":true}");
 }
 
+// ---------- M6: Sensormeter ----------
+
+static void handleSmGet(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String j;
+  j.reserve(6144);
+  j += "{\"config\":";
+  sm::toJson(j);
+  j += ",\"status\":";
+  sm_poller::statusJson(j);
+  j += '}';
+  req->send(200, "application/json", j);
+}
+
+static void handleSmSave(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String json = formParam(req, "json");
+  String err;
+  if (json.isEmpty() || !sm::setFromJson(json.c_str(), json.length(), err)) {
+    if (err.isEmpty()) err = "keine Daten";
+    req->send(400, "application/json", "{\"error\":\"" + jsonEscape(err) + "\"}");
+    return;
+  }
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void handleSmPoll(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  if (!sm_poller::pollNow(formParam(req, "idx").toInt())) {
+    req->send(404, "application/json", "{\"error\":\"Gerät unbekannt\"}");
+    return;
+  }
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void handleSmTest(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String err;
+  if (!sm_poller::sendTest(formParam(req, "idx").toInt(), err)) {
+    req->send(400, "application/json", "{\"error\":\"" + jsonEscape(err) + "\"}");
+    return;
+  }
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
 // ---------- M5: Firmware-Update ----------
 
 // Der Upload-Callback läuft VOR dem Request-Handler. Ohne eigene Prüfung
@@ -445,6 +492,11 @@ void web_ui::begin() {
   server.on(AsyncURIMatcher::exact("/api/cli/job"), HTTP_GET, handleCliJob);
   server.on(AsyncURIMatcher::exact("/api/profile"), HTTP_GET, handleProfile);
   server.on(AsyncURIMatcher::exact("/api/ota"), HTTP_POST, handleOtaDone, handleOtaUpload);
+  server.on(AsyncURIMatcher::exact("/api/sm"), HTTP_GET, handleSmGet);
+  server.on(AsyncURIMatcher::exact("/api/sm/save"), HTTP_POST, handleSmSave);
+  server.on(AsyncURIMatcher::exact("/api/sm/poll"), HTTP_POST, handleSmPoll);
+  server.on(AsyncURIMatcher::exact("/api/sm/test"), HTTP_POST, handleSmTest);
+  server.on(AsyncURIMatcher::exact("/api/sm/log"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, alert_log); });
   server.on(AsyncURIMatcher::exact("/api/channels"), HTTP_GET, handleChannelsGet);
   server.on(AsyncURIMatcher::exact("/api/channels"), HTTP_POST, handleChannelsPost);
   server.on(AsyncURIMatcher::exact("/api/channels/send"), HTTP_POST, handleChannelSend);

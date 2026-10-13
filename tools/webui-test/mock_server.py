@@ -32,7 +32,7 @@ def load_profile():
 CAP = {'console': 150, 'packets': 300}
 logs = {'console': [], 'packets': []}
 seq = {'console': 1, 'packets': 1}
-lock = threading.Lock()
+lock = threading.RLock()   # reentrant: FakeSm ruft push() unter Lock
 t0 = time.time()
 
 
@@ -255,6 +255,139 @@ def ver_tuple(v):
     return (int(a), int(b), int(c), 10**9 if rc is None else int(rc))
 
 
+import urllib.request
+
+UNITS = {'temperature': '°C', 'humidity': '%', 'pressureHpa': 'hPa', 'lux': 'lx', 'eco2Ppm': 'ppm'}
+LABELS = {'temperature': 'Temperatur', 'humidity': 'Feuchte', 'pressureHpa': 'Luftdruck', 'lux': 'Helligkeit', 'eco2Ppm': 'eCO2'}
+
+
+class FakeSm:
+    """Vereinfachter Nachbau von SmConfig + SmPoller (Regeln ohne Mindestdauer)."""
+
+    def __init__(self):
+        self.cfg = {'settings': {'enabled': True, 'defaultChannel': -1, 'maxPerHour': 6, 'offlineAfterFails': 3,
+                                 'alertText': '', 'recoverText': '', 'offlineText': '', 'onlineText': ''},
+                    'devices': [], 'rules': []}
+        self.dev_state = []
+        self.rule_state = []
+        self.sent = 0
+
+    def save(self, j):
+        devs = j.get('devices', [])
+        if len(devs) > 8: return 'Maximal 8 Geräte'
+        for i, d in enumerate(devs):
+            if not d.get('name'): return 'Gerät %d: Name fehlt' % (i + 1)
+            if not re.fullmatch(r'[A-Za-z0-9._-]+', d.get('host', '')): return 'Gerät %s: Adresse ungültig' % d['name']
+            oi = d.pop('origIdx', -1)
+            if d.get('pass') == '***' and 0 <= oi < len(self.cfg['devices']):
+                d['pass'] = self.cfg['devices'][oi]['pass']
+        rules = j.get('rules', [])
+        if len(rules) > 16: return 'Maximal 16 Regeln'
+        for i, r in enumerate(rules):
+            if not (0 <= r.get('device', -1) < len(devs)): return 'Regel %d: Gerät ungültig' % (i + 1)
+            if '.' not in r.get('path', ''): return 'Regel %d: Messwert fehlt' % (i + 1)
+        # Wie SmPoller::syncConfig: Zustand unveränderter Geräte/Regeln behalten
+        dkey = lambda d: (d['host'], d.get('port', 80))
+        rkey = lambda r, ds: (dkey(ds[r['device']]), r['path'], r['op'], r['threshold'], r.get('hysteresis', 0), r.get('minDurationS', 0))
+        old_d = {dkey(d): s for d, s in zip(self.cfg['devices'], self.dev_state)}
+        old_r = {rkey(r, self.cfg['devices']): s for r, s in zip(self.cfg['rules'], self.rule_state)}
+        self.dev_state = [old_d.get(dkey(d), {'polled': False}) for d in devs]
+        self.rule_state = [old_r.get(rkey(r, devs), {'state': 'normal', 'value': None, 'lastEvent': ''}) for r in rules]
+        kd = sum(1 for d in devs if dkey(d) in old_d); kr = sum(1 for r in rules if rkey(r, devs) in old_r)
+        self.cfg = j
+        push('smlog', 'S', 'Konfiguration übernommen (%d Geräte, %d Regeln mit Zustand behalten)' % (kd, kr))
+        for i in range(len(devs)): self.poll(i)
+        return None
+
+    def fetch(self, d):
+        if d['host'].startswith('sim-'):
+            t = 35.0 if 'hot' in d['host'] else 21.0
+            return {'sensor1': {'name': 'Intern', 'valid': True, 'temperature': t, 'humidity': 45.0}}
+        with urllib.request.urlopen('http://%s:%d/api/sensors' % (d['host'], d.get('port', 80)), timeout=3) as r:
+            return json.loads(r.read())
+
+    def emit(self, ch, text, count=True):
+        ch = ch if ch >= 0 else self.cfg['settings']['defaultChannel']
+        c = chans.ch[ch] if 0 <= ch < chans.MAX else None
+        if not c:
+            push('smlog', 'X', 'kein Kanal gewählt: ' + text); return
+        if count:
+            if self.sent >= self.cfg['settings']['maxPerHour']:
+                push('smlog', 'X', 'Sendelimit erreicht, unterdrückt: ' + text); return
+            self.sent += 1
+        push('smlog', 'A', '%s -> %s' % (c['name'], text))
+        push('messages', 'S', '\t'.join([str(ch), c['name'], '', '0', cli.p['name'] + ': ' + text]))
+
+    @staticmethod
+    def render(tpl, dev, path, val, op, thr, state):
+        k = path.split('.')[-1]
+        f = lambda v: ('%.0f' % v) if abs(v - round(v)) < 0.05 else ('%.1f' % v)
+        rep = {'{device}': dev, '{metric}': LABELS.get(k, k), '{value}': f(val) if val is not None else '?',
+               '{unit}': UNITS.get(k, ''), '{op}': '<' if op else '>', '{threshold}': f(thr), '{state}': state}
+        for a, b in rep.items(): tpl = tpl.replace(a, b)
+        return tpl
+
+    def poll(self, i):
+        d = self.cfg['devices'][i]
+        st = self.dev_state[i]
+        st['polled'] = True
+        try:
+            data = self.fetch(d)
+            vals = []
+            for sk, so in data.items():
+                if not isinstance(so, dict) or so.get('valid') is False: continue
+                for fk, fv in so.items():
+                    if fk in ('valid', 'name') or not isinstance(fv, (int, float)) or isinstance(fv, bool): continue
+                    vals.append({'path': '%s.%s' % (sk, fk), 'sensor': so.get('name', ''), 'label': LABELS.get(fk, fk),
+                                 'unit': UNITS.get(fk, ''), 'value': fv})
+            st.update(online=True, offline=False, fails=0, lastOk=time.time(), error='', values=vals)
+        except Exception as e:
+            st.update(online=False, fails=st.get('fails', 0) + 1, error=str(e)[:60])
+            return
+        for ri, r in enumerate(self.cfg['rules']):
+            if r['device'] != i or not r.get('enabled', True): continue
+            v = next((x['value'] for x in vals if x['path'] == r['path']), None)
+            rs = self.rule_state[ri]
+            rs['value'] = v
+            if v is None: continue
+            viol = v > r['threshold'] if r['op'] == 0 else v < r['threshold']
+            if viol and rs['state'] != 'alert':
+                rs['state'] = 'alert'; rs['lastEvent'] = 'ALARM'
+                tpl = r.get('text') or self.cfg['settings'].get('alertText') or '{state} {device}: {metric} {value}{unit} ({op}{threshold}{unit})'
+                self.emit(r['channel'], self.render(tpl, d['name'], r['path'], v, r['op'], r['threshold'], 'ALARM'))
+
+    def test(self, i):
+        if not (0 <= i < len(self.cfg['rules'])): return 'Regel unbekannt'
+        r = self.cfg['rules'][i]
+        ch = r['channel'] if r['channel'] >= 0 else self.cfg['settings']['defaultChannel']
+        if not (0 <= ch < chans.MAX and chans.ch[ch]): return 'kein gültiger Kanal'
+        tpl = r.get('text') or self.cfg['settings'].get('alertText') or '{state} {device}: {metric} {value}{unit} ({op}{threshold}{unit})'
+        txt = self.render(tpl, self.cfg['devices'][r['device']]['name'], r['path'], self.rule_state[i]['value'], r['op'], r['threshold'], 'TEST')
+        if '{state}' not in tpl: txt = 'TEST ' + txt
+        self.emit(ch, txt, False)
+        return None
+
+    def json(self):
+        c = json.loads(json.dumps(self.cfg))
+        for d in c['devices']:
+            if d.get('pass'): d['pass'] = '***'
+        devs = []
+        for i, s in enumerate(self.dev_state):
+            devs.append({'idx': i, 'polled': s.get('polled', False), 'online': s.get('online', False), 'offline': s.get('offline', False),
+                         'fails': s.get('fails', 0), 'lastOkAgoS': int(time.time() - s['lastOk']) if s.get('lastOk') else None,
+                         'error': s.get('error', ''), 'values': s.get('values', [])})
+        rules = [{'idx': i, 'state': s['state'], 'value': s['value'], 'lastEvent': s['lastEvent'], 'lastEventAgoS': None}
+                 for i, s in enumerate(self.rule_state)]
+        return {'config': c, 'status': {'devices': devs, 'rules': rules,
+                                        'limit': {'used': self.sent, 'max': self.cfg['settings']['maxPerHour']}}}
+
+
+logs['smlog'] = []
+seq['smlog'] = 1
+CAP['smlog'] = 100
+smm = FakeSm()
+
+
 def mock_ota(body, ctype):
     boundary = ctype.split('boundary=')[1].encode()
     force, data = False, None
@@ -336,8 +469,8 @@ class H(BaseHTTPRequestHandler):
               'stats_radio': {'noise_floor': -112, 'last_rssi': -90, 'last_snr': 7.5, 'tx_air_secs': 3, 'rx_air_secs': 12},
               'stats_packets': {'recv': 10, 'sent': 5, 'flood_tx': 5, 'direct_tx': 0, 'flood_rx': 10, 'direct_rx': 0, 'recv_errors': 0},
               'wifi': {'mode': 'station', 'ssid': 'TestNetz', 'ip': '192.168.1.50', 'rssi': -55, 'mac': 'AA:BB:CC:DD:EE:FF', 'hostname': 'meshcore-gw'}})
-        if u.path in ('/api/console', '/api/packets', '/api/messages'):
-            name = u.path.split('/')[-1]
+        if u.path in ('/api/console', '/api/packets', '/api/messages', '/api/sm/log'):
+            name = 'smlog' if u.path == '/api/sm/log' else u.path.split('/')[-1]
             since = int(q.get('since', ['0'])[0])
             with lock:
                 L = logs[name]
@@ -357,6 +490,9 @@ class H(BaseHTTPRequestHandler):
         if u.path == '/api/channels':
             with lock:
                 return self.send_json(chans.json())
+        if u.path == '/api/sm':
+            with lock:
+                return self.send_json(smm.json())
         self.send_response(404); self.end_headers()
 
     def do_POST(self):
@@ -394,6 +530,24 @@ class H(BaseHTTPRequestHandler):
                     chans.ch[i]['scope'] = sc
                     return self.send_json({'ok': True})
             return self.send_json({'error': 'unbekannte Aktion'}, 400)
+        if u.path == '/api/sm/save':
+            try:
+                j = json.loads(form.get('json', [''])[0])
+            except Exception as e:
+                return self.send_json({'error': 'JSON: ' + str(e)}, 400)
+            with lock:
+                err = smm.save(j)
+            return self.send_json({'error': err}, 400) if err else self.send_json({'ok': True})
+        if u.path == '/api/sm/poll':
+            i = int(form.get('idx', ['-1'])[0])
+            with lock:
+                if not (0 <= i < len(smm.cfg['devices'])): return self.send_json({'error': 'Gerät unbekannt'}, 404)
+                smm.poll(i)
+            return self.send_json({'ok': True})
+        if u.path == '/api/sm/test':
+            with lock:
+                err = smm.test(int(form.get('idx', ['-1'])[0]))
+            return self.send_json({'error': err}, 400) if err else self.send_json({'ok': True})
         if u.path == '/api/channels/send':
             i = int(form.get('idx', ['-1'])[0]); t = form.get('text', [''])[0].strip()
             with lock:

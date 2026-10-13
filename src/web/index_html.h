@@ -71,6 +71,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <a href="#status" data-v="status">Status</a>
 <a href="#console" data-v="console">Konsole</a>
 <a href="#channels" data-v="channels">Kanäle</a>
+<a href="#sm" data-v="sm">Sensormeter</a>
 <a href="#packets" data-v="packets">Pakete</a>
 <a href="#settings" data-v="settings">Einstellungen</a>
 <a href="#wifi" data-v="wifi">System</a>
@@ -185,6 +186,67 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 </div>
 <div class="row"><button type="button" id="chAdd">Hinzufügen</button><span class="msg" id="chMsg" style="margin:0"></span></div>
 </section>
+</div>
+
+<div class="view" id="v_sm">
+<section style="margin-bottom:16px">
+<h2>Geräte</h2>
+<div class="tbl"><table><thead><tr><th>Name</th><th>Adresse</th><th>Status</th><th>Messwerte</th><th></th></tr></thead><tbody id="smDevBody"></tbody></table></div>
+<p class="hint" id="smDevEmpty" hidden>Noch kein Sensormeter eingetragen.</p>
+<div class="form" style="margin-top:14px" id="smDevForm">
+<div class="grp" id="smDevTitle">Gerät hinzufügen</div>
+<label for="sdName">Name</label><div class="fld"><input id="sdName" maxlength="23" placeholder="z. B. Serverraum"></div>
+<label for="sdHost">Adresse</label><div class="fld"><input id="sdHost" maxlength="63" placeholder="10.10.0.148" spellcheck="false"><small>IP oder Hostname im LAN, abgefragt wird http://Adresse/api/sensors</small></div>
+<label for="sdPort">Port</label><div class="fld"><input id="sdPort" type="number" min="1" max="65535" value="80"></div>
+<label for="sdInt">Abfrage alle (s)</label><div class="fld"><input id="sdInt" type="number" min="10" max="3600" value="60"></div>
+<label for="sdUser">Login (optional)</label><div class="fld"><div class="radio4" style="grid-template-columns:1fr 1fr"><input id="sdUser" maxlength="15" placeholder="Benutzer" autocomplete="off"><input id="sdPass" type="password" maxlength="31" placeholder="Passwort" autocomplete="new-password"></div><small>Sensormeter liefern /api/sensors ohne Login</small></div>
+<label>Optionen</label><div class="fld"><label class="chk"><input type="checkbox" id="sdOff" checked> Meldung, wenn nicht erreichbar</label><label class="chk"><input type="checkbox" id="sdEn" checked> aktiv</label></div>
+</div>
+<div class="row"><button type="button" id="sdSave">Gerät speichern</button><button type="button" class="sec" id="sdCancel" hidden>Abbrechen</button><span class="msg" id="sdMsg" style="margin:0"></span></div>
+</section>
+
+<section style="margin-bottom:16px">
+<h2>Regeln</h2>
+<div class="tbl"><table><thead><tr><th>Gerät / Messwert</th><th>Bedingung</th><th>Kanal</th><th>Zustand</th><th></th></tr></thead><tbody id="smRuleBody"></tbody></table></div>
+<p class="hint" id="smRuleEmpty" hidden>Noch keine Regeln.</p>
+<div class="form" style="margin-top:14px">
+<div class="grp" id="smRuleTitle">Regel hinzufügen</div>
+<label for="srDev">Gerät</label><div class="fld"><select id="srDev"></select></div>
+<label for="srPath">Messwert</label><div class="fld"><select id="srPath"></select><small id="srPathHint">Liste aus der letzten Abfrage des Geräts</small></div>
+<label for="srOp">Bedingung</label><div class="fld"><div class="radio4" style="grid-template-columns:1fr 1fr"><select id="srOp"><option value="0">über (&gt;)</option><option value="1">unter (&lt;)</option></select><input id="srThr" type="number" step="any" placeholder="Grenzwert"></div></div>
+<label for="srHyst">Hysterese</label><div class="fld"><input id="srHyst" type="number" step="any" min="0" value="0.5"><small>Entwarnung erst, wenn der Wert um so viel zurück ist (verhindert Flattern)</small></div>
+<label for="srMin">Mindestdauer (s)</label><div class="fld"><input id="srMin" type="number" min="0" max="86400" value="0"><small>So lange muss die Grenze überschritten sein, 0 = sofort</small></div>
+<label for="srRep">Erinnern alle (min)</label><div class="fld"><input id="srRep" type="number" min="0" max="1440" value="0"><small>0 = nur einmal melden</small></div>
+<label for="srCh">Kanal</label><div class="fld"><select id="srCh"></select></div>
+<label for="srText">Text</label><div class="fld"><input id="srText" maxlength="99" spellcheck="false"><small>leer = Standardtext. Platzhalter: {state} {device} {metric} {value} {unit} {op} {threshold}</small></div>
+<label>Optionen</label><div class="fld"><label class="chk"><input type="checkbox" id="srRec" checked> Entwarnung senden</label><label class="chk"><input type="checkbox" id="srEn" checked> aktiv</label></div>
+</div>
+<div class="row"><button type="button" id="srSave">Regel speichern</button><button type="button" class="sec" id="srCancel" hidden>Abbrechen</button><span class="msg" id="srMsg" style="margin:0"></span></div>
+</section>
+
+<div class="grid">
+<section>
+<h2>Einstellungen</h2>
+<label class="chk"><input type="checkbox" id="ssEn"> Abfrage und Meldungen aktiv</label>
+<label for="ssCh">Standardkanal (für Regeln ohne eigenen Kanal und Offline-Meldungen)</label>
+<select id="ssCh"></select>
+<label for="ssMax">Höchstens Meldungen pro Stunde</label>
+<input id="ssMax" type="number" min="0" max="60">
+<label for="ssOff">Offline nach … Fehlversuchen in Folge (0 = nie)</label>
+<input id="ssOff" type="number" min="0" max="100">
+<label for="ssAlert">Text Alarm</label><input id="ssAlert" maxlength="99" spellcheck="false">
+<label for="ssRec">Text Entwarnung</label><input id="ssRec" maxlength="99" spellcheck="false">
+<label for="ssOffT">Text Offline</label><input id="ssOffT" maxlength="99" spellcheck="false">
+<label for="ssOnT">Text wieder Online</label><input id="ssOnT" maxlength="99" spellcheck="false">
+<div class="row"><button type="button" id="ssSave">Einstellungen speichern</button><span class="msg" id="ssMsg" style="margin:0"></span></div>
+<p class="hint" id="ssLimit"></p>
+</section>
+<section>
+<h2>Meldungen</h2>
+<div class="term" id="smLog" style="height:420px"></div>
+<p class="hint">Jede Meldung ist eine Kanalnachricht (Flood) und kostet Airtime. Der Knotenname wird automatisch vorangestellt.</p>
+</section>
+</div>
 </div>
 
 <div class="view" id="v_settings">
@@ -315,6 +377,7 @@ function show(v){
   if(v==='console')setTimeout(()=>$('cliIn').focus(),0);
   if(v==='settings')openSettings();
   if(v==='channels')loadChannels();
+  if(v==='sm')smLoad();
   tick();
 }
 window.onhashchange=()=>show(location.hash.slice(1));
@@ -582,6 +645,177 @@ $('msgForm').onsubmit=async e=>{
   try{await postForm('/api/channels/send',{idx:$('msgCh').value,text:t});$('msgText').value='';
     for(const d of [300,900,2000])setTimeout(msgs.poll,d)}
   catch(err){msgs.add('F','Senden fehlgeschlagen: '+err.message)}
+};
+
+/* ---------- Sensormeter ---------- */
+// Standardtexte wie in src/SmConfig.cpp (nur als Platzhalter angezeigt; leer = Standard)
+const SM_DEF={alert:'{state} {device}: {metric} {value}{unit} ({op}{threshold}{unit})',
+  recover:'OK {device}: {metric} {value}{unit} wieder normal',offline:'OFFLINE {device} nicht erreichbar',online:'ONLINE {device} wieder erreichbar'};
+let smCfg=null,smSt=null,smEditDev=-1,smEditRule=-1;
+const smLogFeed=makeFeed('/api/sm/log',$('smLog'),300,()=>true);
+const smLogAdd=smLogFeed.add;
+smLogFeed.add=(cls,text,ts)=>smLogAdd(cls==='A'?'T':(cls==='X'?'F':'s'),text,ts);
+function chName(i){if(i<0)return'Standard';const c=channels.find(x=>x.idx===i);return c?c.name:'(Kanal '+i+' fehlt)'}
+function fillChSelect(sel,withStd,cur){
+  sel.innerHTML='';
+  if(withStd){const o=document.createElement('option');o.value='-1';o.textContent=withStd;sel.appendChild(o)}
+  channels.forEach(c=>{const o=document.createElement('option');o.value=c.idx;o.textContent=c.name;sel.appendChild(o)});
+  sel.value=String(cur);if(sel.selectedIndex<0)sel.value='-1';
+}
+function fillRuleChannels(){
+  if(!smCfg)return;
+  fillChSelect($('srCh'),'Standardkanal',$('srCh').value||-1);
+  fillChSelect($('ssCh'),'(keiner)',smSetDirty?$('ssCh').value:smCfg.settings.defaultChannel);
+}
+function ago(s){if(s===null||s===undefined)return'–';if(s<90)return s+' s';if(s<5400)return Math.round(s/60)+' min';return Math.round(s/3600)+' h'}
+function fmtVal(v){return (Math.round(v*10)/10).toString()}
+async function smSave(cfg,msgEl,okText){
+  const r=await fetch('/api/sm/save',{method:'POST',body:new URLSearchParams({json:JSON.stringify(cfg)})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){msgEl.textContent=j.error||('Fehler '+r.status);msgEl.className='msg bad';return false}
+  msgEl.textContent=okText;msgEl.className='msg ok';await smLoad();return true;
+}
+function smCfgForSave(){
+  // Passwörter: "***" = unverändert; origIdx sagt dem Gateway, welches alte Passwort gemeint ist.
+  const c=JSON.parse(JSON.stringify(smCfg));
+  c.devices.forEach((d,i)=>{if(d.origIdx===undefined)d.origIdx=i});
+  return c;
+}
+function smRender(){
+  const st=smSt||{devices:[],rules:[],limit:{used:0,max:0}};
+  // Geräte
+  const tb=$('smDevBody');tb.innerHTML='';
+  smCfg.devices.forEach((d,i)=>{
+    const s=st.devices.find(x=>x.idx===i)||{};
+    const tr=document.createElement('tr');
+    const td=(t,cls)=>{const e=document.createElement('td');if(cls)e.className=cls;if(t!==undefined)e.textContent=t;tr.appendChild(e);return e};
+    td(d.name+(d.enabled?'':' (aus)'));
+    td(d.host+(d.port!==80?':'+d.port:''),'mono');
+    const stc=td();
+    if(!d.enabled)stc.textContent='deaktiviert';
+    else if(!s.polled)stc.textContent='wartet …';
+    else if(s.online){stc.textContent='✓ vor '+ago(s.lastOkAgoS);stc.className='ok'}
+    else{stc.textContent=(s.offline?'OFFLINE: ':'✗ ')+(s.error||'Fehler');stc.className='bad'}
+    td((s.values||[]).map(v=>(v.sensor&&st.devices.length?v.sensor+' ':'')+v.label+' '+fmtVal(v.value)+v.unit).join(' · ')||'–');
+    const a=td();
+    [['abfragen',async()=>{await postForm('/api/sm/poll',{idx:i});setTimeout(smLoad,2500)}],
+     ['bearbeiten',()=>smDevEdit(i)],
+     ['löschen',async()=>{const n=smCfg.rules.filter(r=>r.device===i).length;
+       if(!confirm('Gerät '+d.name+' löschen?'+(n?' Dazu '+n+' Regel(n).':'')))return;
+       const c=smCfgForSave();c.devices.splice(i,1);
+       c.rules=c.rules.filter(r=>r.device!==i).map(r=>Object.assign(r,{device:r.device>i?r.device-1:r.device}));
+       await smSave(c,$('sdMsg'),'Gerät gelöscht')}]].forEach(([t,f])=>{const b=document.createElement('button');b.type='button';b.className='chip';b.textContent=t;b.onclick=f;a.appendChild(b)});
+    tb.appendChild(tr);
+  });
+  $('smDevEmpty').hidden=smCfg.devices.length>0;
+  // Regeln
+  const rb=$('smRuleBody');rb.innerHTML='';
+  smCfg.rules.forEach((r,i)=>{
+    const s=st.rules.find(x=>x.idx===i)||{};
+    const dev=smCfg.devices[r.device]||{name:'?'};
+    const tr=document.createElement('tr');
+    const td=(t,cls)=>{const e=document.createElement('td');if(cls)e.className=cls;if(t!==undefined)e.textContent=t;tr.appendChild(e);return e};
+    td(dev.name+' · '+r.path+(r.enabled?'':' (aus)'));
+    td((r.op?'< ':'> ')+r.threshold+(r.hysteresis?' (±'+r.hysteresis+')':'')+(r.minDurationS?', '+r.minDurationS+' s':'')+(r.repeatMin?', alle '+r.repeatMin+' min':''));
+    td(chName(r.channel));
+    const z=td();
+    const txt={alert:'ALARM',pending:'prüft …',normal:'normal'}[s.state]||'–';
+    z.textContent=txt+(s.value!==null&&s.value!==undefined?' ('+fmtVal(s.value)+')':'');
+    z.className=s.state==='alert'?'bad':(s.state==='pending'?'warn':'');
+    const a=td();
+    [['Test',async()=>{try{await postForm('/api/sm/test',{idx:i});$('srMsg').textContent='Testnachricht gesendet';$('srMsg').className='msg ok';setTimeout(smLogFeed.poll,600)}
+        catch(e){$('srMsg').textContent=e.message;$('srMsg').className='msg bad'}}],
+     ['bearbeiten',()=>smRuleEdit(i)],
+     ['löschen',async()=>{if(!confirm('Regel löschen?'))return;const c=smCfgForSave();c.rules.splice(i,1);await smSave(c,$('srMsg'),'Regel gelöscht')}]]
+      .forEach(([t,f])=>{const b=document.createElement('button');b.type='button';b.className='chip';b.textContent=t;b.onclick=f;a.appendChild(b)});
+    rb.appendChild(tr);
+  });
+  $('smRuleEmpty').hidden=smCfg.rules.length>0;
+  // Regel-Formular: Geräteliste + Messwerte
+  const ds=$('srDev'),cur=ds.value;ds.innerHTML='';
+  smCfg.devices.forEach((d,i)=>{const o=document.createElement('option');o.value=i;o.textContent=d.name;ds.appendChild(o)});
+  if(cur!==''&&smCfg.devices[cur])ds.value=cur;
+  $('srSave').disabled=smCfg.devices.length===0;
+  if(!$('srPath').dataset.keep)fillPaths();
+  $('ssLimit').textContent='Gesendet in der letzten Stunde: '+st.limit.used+' von '+st.limit.max+'.';
+}
+function fillPaths(want){
+  const i=parseInt($('srDev').value),s=(smSt&&smSt.devices.find(x=>x.idx===i))||{};
+  const sel=$('srPath'),cur=want||sel.value;sel.innerHTML='';
+  const vals=(s.values||[]).slice();
+  if(cur&&!vals.some(v=>v.path===cur))vals.unshift({path:cur,label:cur,unit:'',sensor:''});
+  vals.forEach(v=>{const o=document.createElement('option');o.value=v.path;o.textContent=v.path+(v.value!==undefined?'  ('+v.label+' '+fmtVal(v.value)+v.unit+')':'');sel.appendChild(o)});
+  if(cur)sel.value=cur;
+  $('srPathHint').textContent=vals.length?'Liste aus der letzten Abfrage des Geräts':'Noch keine Messwerte – Gerät erst abfragen lassen';
+}
+$('srDev').onchange=()=>fillPaths('');
+async function smLoad(){
+  try{
+    const j=await (await fetch('/api/sm',{cache:'no-store'})).json();
+    smCfg=j.config;smSt=j.status;
+    if(!channels.length)await loadChannels();
+    const s=smCfg.settings;
+    if(!smSetDirty){   // bearbeitete, ungespeicherte Felder nicht überschreiben
+      $('ssEn').checked=s.enabled;$('ssMax').value=s.maxPerHour;$('ssOff').value=s.offlineAfterFails;
+      $('ssAlert').value=s.alertText;$('ssRec').value=s.recoverText;$('ssOffT').value=s.offlineText;$('ssOnT').value=s.onlineText;
+    }
+    fillRuleChannels();smRender();
+  }catch(e){$('sdMsg').textContent='Laden fehlgeschlagen';$('sdMsg').className='msg bad'}
+}
+$('ssAlert').placeholder=SM_DEF.alert;$('ssRec').placeholder=SM_DEF.recover;$('ssOffT').placeholder=SM_DEF.offline;$('ssOnT').placeholder=SM_DEF.online;
+$('srText').placeholder='Standard: '+SM_DEF.alert;
+let smSetDirty=false;
+['ssEn','ssCh','ssMax','ssOff','ssAlert','ssRec','ssOffT','ssOnT'].forEach(id=>$(id).addEventListener('input',()=>{smSetDirty=true;$('ssMsg').textContent='ungespeichert';$('ssMsg').className='msg warn'}));
+$('ssSave').onclick=async()=>{
+  const c=smCfgForSave();
+  Object.assign(c.settings,{enabled:$('ssEn').checked,defaultChannel:parseInt($('ssCh').value),maxPerHour:parseInt($('ssMax').value)||0,
+    offlineAfterFails:parseInt($('ssOff').value)||0,alertText:$('ssAlert').value.trim(),recoverText:$('ssRec').value.trim(),
+    offlineText:$('ssOffT').value.trim(),onlineText:$('ssOnT').value.trim()});
+  smSetDirty=false;
+  if(!await smSave(c,$('ssMsg'),'Gespeichert'))smSetDirty=true;
+};
+function smDevEdit(i){
+  smEditDev=i;const d=smCfg.devices[i];
+  $('sdName').value=d.name;$('sdHost').value=d.host;$('sdPort').value=d.port;$('sdInt').value=d.intervalS;
+  $('sdUser').value=d.user;$('sdPass').value=d.pass;$('sdOff').checked=d.offlineAlert;$('sdEn').checked=d.enabled;
+  $('smDevTitle').textContent='Gerät bearbeiten: '+d.name;$('sdCancel').hidden=false;$('sdName').focus();
+}
+function smDevReset(){
+  smEditDev=-1;['sdName','sdHost','sdUser','sdPass'].forEach(id=>$(id).value='');$('sdPort').value=80;$('sdInt').value=60;
+  $('sdOff').checked=$('sdEn').checked=true;$('smDevTitle').textContent='Gerät hinzufügen';$('sdCancel').hidden=true;
+}
+$('sdCancel').onclick=smDevReset;
+$('sdSave').onclick=async()=>{
+  const d={name:$('sdName').value.trim(),host:$('sdHost').value.trim(),port:parseInt($('sdPort').value)||80,intervalS:parseInt($('sdInt').value)||60,
+    user:$('sdUser').value.trim(),pass:$('sdPass').value,offlineAlert:$('sdOff').checked,enabled:$('sdEn').checked};
+  if(!d.name||!d.host){$('sdMsg').textContent='Name und Adresse angeben';$('sdMsg').className='msg bad';return}
+  const c=smCfgForSave();
+  if(smEditDev>=0){d.origIdx=smEditDev;c.devices[smEditDev]=d}else{if(c.devices.length>=8){$('sdMsg').textContent='Maximal 8 Geräte';$('sdMsg').className='msg bad';return}d.origIdx=-1;c.devices.push(d)}
+  if(await smSave(c,$('sdMsg'),smEditDev>=0?'Gerät gespeichert':'Gerät angelegt, wird abgefragt …')){smDevReset();setTimeout(smLoad,3000)}
+};
+function smRuleEdit(i){
+  smEditRule=i;const r=smCfg.rules[i];
+  $('srDev').value=r.device;fillPaths(r.path);$('srOp').value=r.op;$('srThr').value=r.threshold;$('srHyst').value=r.hysteresis;
+  $('srMin').value=r.minDurationS;$('srRep').value=r.repeatMin;$('srCh').value=r.channel;$('srText').value=r.text;
+  $('srRec').checked=r.notifyRecovery;$('srEn').checked=r.enabled;$('srPath').dataset.keep='1';
+  $('smRuleTitle').textContent='Regel bearbeiten';$('srCancel').hidden=false;
+}
+function smRuleReset(){
+  smEditRule=-1;$('srThr').value='';$('srHyst').value='0.5';$('srMin').value=0;$('srRep').value=0;$('srCh').value='-1';$('srText').value='';
+  $('srRec').checked=$('srEn').checked=true;delete $('srPath').dataset.keep;$('smRuleTitle').textContent='Regel hinzufügen';$('srCancel').hidden=true;fillPaths('');
+}
+$('srCancel').onclick=smRuleReset;
+$('srPath').onchange=()=>{$('srPath').dataset.keep='1'};
+$('srSave').onclick=async()=>{
+  const thr=parseFloat($('srThr').value);
+  if(!$('srPath').value){$('srMsg').textContent='Messwert wählen (Gerät erst abfragen)';$('srMsg').className='msg bad';return}
+  if(isNaN(thr)){$('srMsg').textContent='Grenzwert angeben';$('srMsg').className='msg bad';return}
+  const r={device:parseInt($('srDev').value),path:$('srPath').value,op:parseInt($('srOp').value),threshold:thr,
+    hysteresis:Math.abs(parseFloat($('srHyst').value)||0),minDurationS:parseInt($('srMin').value)||0,repeatMin:parseInt($('srRep').value)||0,
+    channel:parseInt($('srCh').value),notifyRecovery:$('srRec').checked,text:$('srText').value.trim(),enabled:$('srEn').checked};
+  const c=smCfgForSave();
+  if(smEditRule>=0)c.rules[smEditRule]=r;else{if(c.rules.length>=16){$('srMsg').textContent='Maximal 16 Regeln';$('srMsg').className='msg bad';return}c.rules.push(r)}
+  if(await smSave(c,$('srMsg'),smEditRule>=0?'Regel gespeichert':'Regel angelegt'))smRuleReset();
 };
 
 /* ---------- CLI-Aufträge (Batch) ---------- */
@@ -908,7 +1142,7 @@ async function openSettings(){
 }
 
 /* ---------- Takt ---------- */
-let lastStatus=0;
+let lastStatus=0,lastSm=0;
 function tick(){
   if(document.hidden)return;
   const now=Date.now();
@@ -916,6 +1150,7 @@ function tick(){
   if(view==='console')con.poll();
   if(view==='packets')pkt.poll();
   if(view==='channels')msgs.poll();
+  if(view==='sm'){smLogFeed.poll();if(now-lastSm>=3000){lastSm=now;smLoad()}}
 }
 setInterval(tick,1000);
 show(location.hash.slice(1)||'status');

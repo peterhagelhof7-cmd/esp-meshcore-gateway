@@ -41,4 +41,5 @@ private:
 
 extern LogBuffer console_log;   // CLI-Befehle, Antworten, Systemmeldungen
 extern LogBuffer packet_log;    // RX/TX-Pakete
+extern LogBuffer alert_log;     // Sensormeter-Meldungen: A=gesendet, X=unterdrückt/Fehler, S=System
 extern LogBuffer channel_log;   // Kanalnachrichten: M=empfangen, S=gesendet

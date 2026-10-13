@@ -289,3 +289,75 @@ erreichbar, und das schon durch versehentliches Drücken.
 ## E21 – Tab „WLAN“ heißt jetzt „System“ (2026-10-14)
 Dort liegen WLAN-Einrichtung, Neustart und das Firmware-Update (Version, Board, Partition und
 Abbild-Status wie „Prüflauf“/„gültig“).
+
+## E22 – M6: Sensormeter-Abfrage und Grenzwert-Meldungen (2026-10-14, autonom entschieden)
+**Datenquelle:** `GET http://<adresse>:<port>/api/sensors`. Das ist bei sensormeter, -poe und -wlan
+**ohne Login** abrufbar (geprüft in den Firmware-Quellen: `handleApiSensors` ruft kein
+`checkAuth` auf). Ein optionaler Basic-Auth ist trotzdem einstellbar. Live geprüft mit zwei
+Sensormetern im LAN (`10.10.0.148`, `…108`). Deren echte Antworten liegen als Fixtures in
+`test/host/fixtures/`.
+
+**JSON → Messwerte** (`src/SmJson.cpp`, host-getestet): Jedes Objekt der obersten Ebene ist ein
+Sensor (`sensor1`, `sensor2`, bei sm-wlan `sensor`). `valid:false` überspringt alle seine Werte,
+`null`/NaN/Text werden übersprungen. Der Pfad ist `sensor.feld`, z. B. `sensor2.lux`. Einheit und
+Anzeigename kommen aus dem Feldnamen (temperature °C, humidity %, pressureHpa hPa, lux lx, eco2Ppm ppm).
+
+**Regel-Logik** (`src/RuleEngine.cpp`, host-getestet, ohne Arduino):
+- Bedingung „über“ oder „unter“ einem Grenzwert
+- **Mindestdauer**: Ein Ausreißer, der vorher wieder verschwindet, löst nichts aus
+- **Hysterese**: Entwarnung erst bei Grenzwert ∓ Hysterese, gegen Flattern. Standard in der UI: 0,5.
+- **Erinnerung** optional alle N Minuten, solange der Wert verletzt bleibt
+- **Entwarnung** optional
+- Gerät **offline** nach N Fehlversuchen in Folge (Standard 3) und **wieder online**, je eine
+  Meldung (pro Gerät abschaltbar)
+- **Sendebegrenzung**: max. N Meldungen pro gleitender Stunde (Standard **6**). Was darüber
+  hinausgeht, wird nur protokolliert, nicht gesendet. Grund: Jede Meldung ist ein Flood im ganzen
+  Netz, und hansemesh nennt 600–700 Pakete pro Stunde als Kapazität des *gesamten* Kanals.
+- Die Zeitlogik ist `millis()`-überlaufsicher (getestet über den Wrap)
+
+**Ausführung:** eigener FreeRTOS-Task `smpoll` auf **Core 0** (WLAN-Core, Priorität 1, 8 KB Stack). HTTP
+mit 3 s Connect- und 4 s Lese-Timeout, Antworten über 4 KB werden verworfen. Meldungen gehen über die
+`MeshActions`-Queue in den Mesh-Loop (E4). Der Mesh-Loop auf Core 1 wird nie blockiert.
+
+**Entscheidungen:**
+- **Ohne eigenes WLAN fragt das Gateway nicht ab und zählt keine Fehlversuche.** Sonst würde
+  ein WLAN-Ausfall des Gateways alle Sensormeter per Funk als OFFLINE melden (Funk geht ja weiter).
+- **Zustände bleiben beim Speichern erhalten**, solange Gerät (Adresse und Port) und Regel
+  (Messwert, Bedingung, Grenzwert, Hysterese, Mindestdauer) gleich bleiben.
+  **Fund aus dem UI-Test:** Die erste Fassung setzte bei jedem Speichern alles zurück, und ein
+  anstehender Alarm wurde bei *jeder* Konfigurationsänderung erneut gesendet. Das ist behoben und
+  per Test abgesichert.
+- **Kanal pro Regel** oder der **Standardkanal**. Offline- und Online-Meldungen gehen immer in den
+  Standardkanal. Ohne gültigen Kanal wird nichts gesendet, sondern nur protokolliert.
+- **Texte:** Pro Regel eigene Vorlage oder die globale Vorlage. Platzhalter: `{state} {device}
+  {metric} {value} {unit} {op} {threshold}`. Die Standardtexte sind kurz gehalten (Airtime), etwa
+  „ALARM Heizraum: Temperatur 35°C (>30°C)“. Der Knotenname wird vom Kanal-Senden davorgesetzt
+  (max. 160 Byte gesamt).
+- **Testnachricht** pro Regel. Sie zählt nicht zum Limit und trägt immer „TEST“ (bei einer eigenen
+  Vorlage ohne `{state}` als Präfix).
+- **Grenzen:** max. 8 Geräte und 16 Regeln, Intervall 10–3600 s (Standard 60 s).
+- **Speicherung:** JSON-Blob in NVS (`gw/smcfg`), übersteht MeshCore-`erase`. Passwörter liefert
+  die API maskiert („***“), beim Speichern bleibt „***“ das alte Passwort (Zuordnung über `origIdx`).
+- **Gerät löschen** entfernt auch dessen Regeln und nummeriert die übrigen um (macht die UI).
+- ⚠ **Bekannte Grenze:** Regeln merken sich den Kanal als **Index**. Wird ein Kanal gelöscht und
+  später ein anderer in denselben Platz angelegt, sendet die Regel dorthin. Die UI zeigt den
+  Kanalnamen an, das fällt also auf. Eine Lösung über Kanalnamen wäre robuster (später).
+- ⚠ **Nicht im Backup:** Die Sensormeter-Konfiguration ist im MeshCore-/Kanal-Backup (M3/M4) noch
+  nicht enthalten.
+- ⚠ **Keine mDNS-Namen** (`*.local`): HTTPClient löst nur DNS auf, also IP oder DNS-Namen eintragen.
+
+**Verifikation:** Host-Tests Regel-Engine + JSON (u. a. echte Antworten der LAN-Sensormeter) grün
+bei `-O2`. UI-Test gegen Mock **78/78**, davon 18 Sensormeter-Prüfungen. Dabei fragt der Mock das
+echte Sensormeter `.148` live ab. **Nicht HW-verifiziert:** Poller-Task und HTTPClient auf dem ESP
+sowie die tatsächliche Kanalnachricht per Funk.
+
+## E23 – Qualitätschecks über alle Meilensteine (2026-10-14)
+- **Warnungen:** Upstream baut mit `-w`. Ein einmaliger Build mit `-Wall -Wextra` (ohne `-w`) zeigt
+  **0 Warnungen in `src/`**. Alle 398 Warnungen stammen aus Upstream-Headern und Bibliotheken.
+- **Testfehler gefunden:** Im Host-Test las `check(…, f()==-1, err)` den Puffer `err` je nach
+  (unspezifizierter) Argument-Reihenfolge, bevor `f()` ihn füllte. Das führte zu einem Absturz bei `-O1`. Der Fehler lag im
+  Test, nicht im Produktcode, und ist korrigiert.
+- `tools/host-test.ps1`: `ErrorActionPreference = Continue`, weil PowerShell 5.1 sonst jede
+  stderr-Zeile von pio/g++ als Abbruch wertet.
+- Nach Änderungen an `lib_deps` baut PlatformIO die Build-Ordner neu auf, dann fehlen die
+  `firmware.bin` des jeweils anderen Envs. Der UI-Test prüft das jetzt vorab mit klarer Meldung.
