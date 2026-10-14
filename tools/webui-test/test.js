@@ -330,11 +330,12 @@ async function runCli(page, cmd) {
   await page.click('nav a[data-v=settings]');
   check('Einst.: Profil geladen', await waitFor(async () => (await text('#profMsg')).includes('Abweichung')), await text('#profMsg'));
   const rows = await page.$$eval('#profBody tr', r => r.length);
-  check('Einst.: Profil-Tabelle', rows >= 20, rows + ' Zeilen');
+  check('Einst.: Profil-Tabelle ohne Regionen', rows === 19 && !(await text('#profBody')).includes('region'), rows + ' Zeilen');
   const crBefore = await page.$eval('#f_rc', e => e.value);
   check('Einst.: CR vorher 5 (Upstream-Default)', crBefore === '5', crBefore);
   check('Einst.: fem.txgain als nicht verfügbar markiert', await page.$eval('#fb_radio\\.fem\\.txgain', e => e.classList.contains('na')));
   check('Einst.: Regionen leer', await waitFor(async () => (await text('#regOut')).trim() === '* F'), await text('#regOut'));
+  check('Einst.: Warnung „Keine Region angelegt“', await waitFor(async () => !(await page.$eval('#regWarn', e => e.hidden))));
   await page.screenshot({ path: out + '/05_settings_before.png', fullPage: true });
 
   await page.click('#profApply');
@@ -343,9 +344,21 @@ async function runCli(page, cmd) {
   check('Einst.: CR jetzt 8', (await page.$eval('#f_rc', e => e.value)) === '8');
   check('Einst.: dutycycle 10', (await page.$eval('#f_dutycycle', e => e.value)) === '10.0', await page.$eval('#f_dutycycle', e => e.value));
   check('Einst.: Neustart-Banner sichtbar', await page.$eval('#rebootBanner', e => e.classList.contains('on')));
-  await waitFor(async () => (await text('#regOut')).includes('rhein-main'));
+  // Profil legt keine Regionen an (E36), Warnung bleibt bis eigene Regionen da sind
+  await sleep(500);
+  check('Einst.: Profil legt keine Regionen an', (await text('#regOut')).trim() === '* F' && !(await page.$eval('#regWarn', e => e.hidden)), await text('#regOut'));
+  for (const n of ['de-by', 'rhein-main']) {
+    await page.select('#regAct', 'put');
+    await page.$eval('#regName', (e, v) => { e.value = v; }, n);
+    await page.click('#regRun');
+    await waitFor(async () => (await text('#regOut')).includes(n + ' F'));
+  }
+  await page.click('#regSave');
+  await waitFor(async () => (await text('#regMsg')).length > 1 && (await text('#regMsg')) !== '…');
   const reg = await text('#regOut');
-  check('Einst.: Regionen angelegt', ['de-he F', 'de-by F', 'rhein-main F'].every(r => reg.includes(r)), JSON.stringify(reg));
+  check('Einst.: Regionen von Hand angelegt', ['de-by F', 'rhein-main F'].every(r => reg.includes(r)), JSON.stringify(reg));
+  check('Einst.: Warnung weg', await waitFor(async () => await page.$eval('#regWarn', e => e.hidden)));
+  check('Einst.: Profil weiter „Alles wie empfohlen“ (Regionen zählen nicht)', await waitFor(async () => (await text('#profMsg')) === 'Alles wie empfohlen'), await text('#profMsg'));
 
   // Feld ändern -> nur dieser set-Befehl, danach 1 Abweichung im Profil
   await page.$eval('#f_txdelay', e => { e.value = '1.5'; e.dispatchEvent(new Event('input')); });

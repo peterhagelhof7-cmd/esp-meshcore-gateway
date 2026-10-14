@@ -5,6 +5,10 @@
 //          hansemesh.de/anleitungen/heltec-v3-v4/
 // Befehlsnamen gegen MeshCore 1.17.1 (CommonCLI.cpp) geprüft. hansemesh nennt
 // teils andere Namen (advert.interval.zero/.flood), siehe E15.
+//
+// Regionen gehören bewusst NICHT ins Profil (E36): sie hängen vom Standort ab
+// und werden mit der lokalen Community abgestimmt. Die Weboberfläche warnt,
+// solange keine Region angelegt ist.
 
 const char* profile::NAME = "HanseMesh-Empfehlung Repeater Heltec V4 (ländlich)";
 
@@ -28,10 +32,6 @@ const ProfileEntry profile::ENTRIES[] = {
   {"set multi.acks 1", "get multi.acks", "1", "zuverlässigere Zustellung"},
   {"set radio.rxgain off", "get radio.rxgain", "off", "1.17.1 auf V4: Vorverstärker hebt Noise Floor auf ca. -84 dBm"},
   {"set radio.fem.rxgain off", "get radio.fem.rxgain", "off", "dito, FEM-LNA des V4"},
-  {"region put de-he", "region get de-he", "de-he F", "lokale Region (Absprache)"},
-  {"region put de-by", "region get de-by", "de-by F", "lokale Region (Absprache)"},
-  {"region put rhein-main", "region get rhein-main", "rhein-main F", "lokale Region (Absprache)"},
-  {"region save", nullptr, nullptr, "Regionen dauerhaft speichern"},
 };
 
 const size_t profile::COUNT = sizeof(profile::ENTRIES) / sizeof(profile::ENTRIES[0]);

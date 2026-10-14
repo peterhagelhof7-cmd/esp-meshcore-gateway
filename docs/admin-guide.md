@@ -1,6 +1,6 @@
 # Admin-Handbuch: MeshCore-Gateway
 
-Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.7.5, MeshCore 1.17.1.
+Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.7.6, MeshCore 1.17.1.
 
 **Inhalt**
 
@@ -81,8 +81,8 @@ nicht auf USB zugreifen. Treiber sind nicht nötig, das V4 hat USB direkt im Chi
 ## 4. Erstinbetriebnahme Schritt für Schritt
 
 Beim allerersten Start übernimmt das Gateway die **Empfehlungen für Deutschland nach hansemesh.de**
-(Funkparameter EU/UK Narrow 869,618 MHz, Sendeleistung, Flood-Grenzen, Advert-Intervalle u. a.) und **drei
-Regionen** (siehe [Abschnitt 5](#5-regionen-richtig-einrichten)), die an deinen Standort angepasst werden müssen.
+(Funkparameter EU/UK Narrow 869,618 MHz, Sendeleistung, Flood-Grenzen, Advert-Intervalle u. a.).
+**Regionen legt es nicht an**, die hängen vom Standort ab (siehe [Abschnitt 5](#5-regionen-richtig-einrichten)).
 
 ### 4.1 WLAN einrichten
 
@@ -116,8 +116,8 @@ Funkparameter und Schlüssel werden erst nach **„Jetzt neu starten“** wirksa
 
 ### 4.4 Regionen anpassen
 
-Siehe [Abschnitt 5](#5-regionen-richtig-einrichten). **Dieser Schritt ist Pflicht**, wenn dein Standort nicht im
-Rhein-Main-Gebiet liegt.
+Siehe [Abschnitt 5](#5-regionen-richtig-einrichten). **Dieser Schritt ist Pflicht.** Solange keine Region angelegt
+ist, zeigt **Einstellungen → Regionen** die Warnung „Keine Region angelegt“.
 
 ### 4.5 Funk prüfen
 
@@ -155,32 +155,33 @@ Liste). Nachrichten ohne Region leitet er weiter, begrenzt durch `flood.max.unsc
 - **Überflüssige Regionen** (z. B. `rhein-main` in Hamburg) lassen Verkehr durch, der dort nichts verloren hat,
   und kosten Sendezeit.
 
-### Voreinstellung
+### Ausgangszustand
 
-Beim Erststart legt das Gateway an: **`de-he`, `de-by`, `rhein-main`** (alle mit Weiterleiten erlaubt). Das passt
-für den Raum Hessen/Unterfranken/Rhein-Main, **nicht für andere Gegenden**.
+Ein frisch installiertes Gateway hat **keine Regionen** (nur `*`, den Platzhalter für Nachrichten ohne Region).
+Es leitet dann nur Nachrichten ohne Region weiter. Die Weboberfläche warnt, bis mindestens eine Region angelegt
+ist. Die Empfehlung (Einstellungen → Empfehlung) prüft Regionen bewusst nicht, weil es keine für alle Standorte
+richtige Vorgabe gibt.
+
+Beispiel Rhein-Main/Unterfranken: `de-he`, `de-by`, `rhein-main`.
 
 ### Vorgehen
 
 1. **Bei der lokalen Community nachfragen**, welche Regionen genutzt werden (z. B. hansemesh.de für
    Norddeutschland, regionale Gruppen/Discord). Üblich sind Bundesland-Kürzel (`de-nw`, `de-ni`, `de-hh`, …) und
    Ballungsräume.
-2. **Einstellungen → Regionen**: Die Liste oben zeigt den aktuellen Stand.
-3. Nicht benötigte Regionen: Aktion **„entfernen“**, Name eintragen, **„Ausführen“**. Unterregionen zuerst
-   entfernen.
-4. Eigene Regionen: Aktion **„anlegen (put)“**, Name (Kleinbuchstaben, Ziffern, `-`), optional Eltern-Region,
+2. **Einstellungen → Regionen**: Die Liste zeigt den aktuellen Stand.
+3. Je Region: Aktion **„anlegen (put)“**, Name (Kleinbuchstaben, Ziffern, `-`), optional Eltern-Region,
    **„Ausführen“**.
-5. Optional die eigene Region **„als Home setzen“**.
-6. **„Speichern (region save)“** – ohne diesen Schritt sind die Änderungen nach dem nächsten Neustart weg.
+4. Optional die eigene Region **„als Home setzen“**.
+5. **„Speichern (region save)“** – ohne diesen Schritt sind die Änderungen nach dem nächsten Neustart weg.
+6. Später Überflüssiges: Aktion **„entfernen“** (Unterregionen zuerst), danach wieder speichern.
 
-Gleiches geht in der Webkonsole: `region`, `region put de-nw`, `region remove rhein-main`, `region save`.
+Gleiches geht in der Webkonsole: `region`, `region put de-nw`, `region remove de-nw`, `region save`.
+
+Ein Backup enthält die Regionen; beim Wiederherstellen werden sie wieder angelegt und gespeichert.
 
 > **Hinweise**
 > - `region load` **nicht** benutzen: friert in MeshCore 1.17.x die Konsole ein.
-> - **Einstellungen → Empfehlung → „Abweichungen übernehmen“** führt **alle** Abweichungen auf einmal aus (vorher
->   wird die Befehlsliste angezeigt) und legt dabei die drei voreingestellten Regionen wieder an. Wer eigene
->   Regionen hat, bricht dort ab und setzt andere abweichende Werte einzeln unter MeshCore-Einstellungen. Die
->   fehlenden Standard-Regionen bleiben dann dauerhaft als Abweichung gelistet, das ist gewollt.
 > - `region denyf *` (keine Nachrichten ohne Region weiterleiten) nur in Absprache mit der Community: Nachrichten von
 >   Geräten ohne gesetzte Region kämen dann nicht mehr durch. Sanfter ist ein niedriges `flood.max.unscoped`
 >   (voreingestellt 5).

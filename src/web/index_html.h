@@ -305,6 +305,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <div class="grid">
 <section>
 <h2>Regionen</h2>
+<div class="msg warn" id="regWarn" hidden><b>Keine Region angelegt.</b> Nachrichten mit Region (Scope) leitet dieser Repeater nicht weiter. Welche Regionen in deiner Gegend genutzt werden, mit der lokalen Community abstimmen, dann anlegen und speichern (<a href="https://github.com/peterhagelhof7-cmd/esp-meshcore-gateway/blob/main/docs/admin-guide.md#5-regionen-richtig-einrichten" target="_blank" rel="noopener">Admin-Handbuch</a>).</div>
 <pre class="out" id="regOut" style="margin-top:0">…</pre>
 <div class="row">
 <select id="regAct" style="flex:1;min-width:120px">
@@ -1184,7 +1185,11 @@ $('profReload').onclick=loadProfile;
 
 /* ---------- Regionen ---------- */
 async function loadRegions(){
-  try{const rep=await runJob(['region'],true);$('regOut').textContent=(rep[0]&&rep[0].reply)||'(leer)'}
+  try{const rep=await runJob(['region'],true);const t=(rep[0]&&rep[0].reply)||'';
+    $('regOut').textContent=t||'(leer)';
+    // Baum aus "region": je Zeile "name [F][^]", "*" = Wildcard (E36)
+    const named=val(t).split(/\r?\n/).map(l=>l.trim().split(/\s+/)[0]).filter(n=>n&&n!=='*');
+    $('regWarn').hidden=named.length>0}
   catch(e){$('regOut').textContent='Fehler: '+e.message}
 }
 async function regCmd(cmd){
