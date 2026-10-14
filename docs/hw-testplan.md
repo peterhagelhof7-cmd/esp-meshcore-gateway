@@ -76,3 +76,8 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 
 ## 9. Dauerlauf
 - [ ] 24 h laufen lassen: freier Heap stabil (Status-Tab), keine Neustarts (Laufzeit), WLAN stabil
+
+## Web-Flasher (E35)
+
+- [ ] https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/ in Chrome: „Verbinden & prüfen“ am Standard-V4 → „Erkannt: Heltec WiFi LoRa 32 V4 (ESP32-S3R2, 2 MB PSRAM)“, Ausstattung zeigt „Embedded PSRAM 2MB“ (nur prüfen reicht, danach „Neu prüfen“/Tab schließen; das Gateway startet dabei neu)
+- [ ] Optional: Installieren ohne Löschen → 0.7.5 bleibt mit allen Einstellungen

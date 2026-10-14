@@ -613,3 +613,29 @@ automatisch, Altwert `meshcore-gw`, Backup leer, Log-Dateiname). Am Gerät noch 
 
 **Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün, UI-Test 136/136 (neu: Tabelle aus
 `neighbors`, nicht in der Konsole, Suche mit Countdown, neuer Nachbar, Knopf gesperrt). Am Gerät noch offen.
+
+## E35 – Web-Flasher mit Board-Prüfung (2026-10-14, User: „webflasher für beide varianten, vorher ein test damit man die korrekte firmware flasht“)
+
+- `docs/index.html` über GitHub Pages (Quelle `/docs`, `.nojekyll`), eigene Seite mit **esptool-js 0.6.1** (jsDelivr,
+  gepinnt) statt ESP Web Tools: Dessen Manifest unterscheidet nur die Chipfamilie, V4 und V4-R8 sind beide ESP32-S3.
+- **Test vor dem Flashen** (gleiche Verbindung wie das Schreiben):
+  1. Chip muss ESP32-S3 sein, Flash 16 MB (`detectFlashSize`).
+  2. eFuse **PSRAM_CAP** (`getPsramCap`) wählt die Variante: 2 = 2 MB = V4 (ESP32-S3R2, QSPI), 1 = 8 MB = V4-R8
+     (ESP32-S3R8, OPI). Alles andere → „Nicht geeignet“, Verbindung getrennt, nichts geschrieben.
+  3. Dateien gegen `docs/fw/manifest.json` (Größe + SHA-256), `firmware.bin` muss das Merkmal
+     `MCGW-FW-ID:<Board>:<Version>:MCGW-FW-END` tragen (fängt vertauschte Dateien auf dem Server).
+  4. Direkt vor dem Schreiben PSRAM_CAP erneut lesen (Board gewechselt → Abbruch).
+- Schreiben wie PlatformIO-Upload: DIO, 80 MHz, 16 MB, komprimiert; bootloader 0x0, partitions 0x8000,
+  **boot_app0 0xe000** (setzt otadata zurück, sonst bliebe ein Gerät, das zuletzt aus app1 lief, dort), firmware 0x10000.
+  esptool-js prüft jede Datei nach dem Schreiben per MD5 (crypto-js 4.2.0 von cdnjs). Option „Flash vorher komplett
+  löschen“ standardmäßig an (Erstinstallation); Updates laufender Gateways besser per OTA (behält alles).
+- `tools/flasher-update.ps1 [-Build]` kopiert beide Builds nach `docs/fw/{v4,r8}/`, prüft das Merkmal mit der aktuellen
+  `GATEWAY_VERSION` und schreibt das Manifest. Bei jedem Release ausführen und `docs/fw/` mitcommitten.
+- Bekannt: Die Seite selbst ist nicht mit echter Hardware getestet (Web Serial braucht die Port-Auswahl durch den
+  Nutzer). Die PSRAM-Zuordnung deckt sich mit dem esptool-Ergebnis am echten Standard-V4 („Embedded PSRAM 2MB“, E29).
+
+**Verifikation:** `tools/webui-test/flasher_test.js` 29/29 gegen die echte Seite mit nachgebauten Boards: Wahl V4/R8,
+Ablehnung (ohne PSRAM, klassischer ESP32, 8 MB Flash), SHA-256-Fehler, R8-Firmware als V4 (Merkmal), kompletter
+Ablauf V4 (4 Dateien, Adressen, Parameter, MD5 = Node-MD5, Neustart) und R8 ohne Löschen, Board-Wechsel vor dem
+Schreiben, kein Gerät gewählt, CDN-Bibliotheken ladbar, Handybreite. Dabei gefunden: `dl{display:grid}` überstimmte
+`hidden` (alte Chipdaten blieben stehen) → `[hidden]{display:none!important}`.
