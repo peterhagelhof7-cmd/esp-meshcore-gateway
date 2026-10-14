@@ -8,6 +8,7 @@
 #include <new>
 
 #include "ChannelStore.h"
+#include "EventLog.h"
 #include "LogBuffer.h"
 #include "MeshActions.h"
 #include "NetworkManager.h"
@@ -53,6 +54,7 @@ struct Runtime {
   Config cfg;
   uint32_t gen = 0;
   DevRuntime dev[MAX_DEVICES];
+  DevRuntime internal;            // Pseudo-Gerät INTERNAL_DEVICE (E30)
   RuleRuntime rule[MAX_RULES];
   PingRuntime ping[MAX_PINGS];
   rules::RateLimiter limiter;
@@ -61,6 +63,9 @@ struct Runtime {
 
 Runtime* R = nullptr;              // PSRAM
 SemaphoreHandle_t s_lock = nullptr;   // schützt R (außer der HTTP-Abfrage selbst)
+volatile float s_chipTemp = NAN;      // letzte Messung, auch ohne Überwachung
+
+DevRuntime& runtimeOf(int di) { return di == INTERNAL_DEVICE ? R->internal : R->dev[di]; }
 
 void logLine(char type, const char* text) {
   alert_log.push(type, (uint32_t)time(nullptr), text);
@@ -147,7 +152,7 @@ void syncConfig() {
     if (!r.used) continue;
     for (int j = 0; j < MAX_RULES; j++) {
       const Rule& o = oldCfg.rules[j];
-      if (o.used && sameRule(r, R->cfg.devices[r.device], o, oldCfg.devices[o.device])) {
+      if (o.used && sameRule(r, deviceOf(R->cfg, r.device), o, deviceOf(oldCfg, o.device))) {
         R->rule[i] = oldRule[j];
         keptRule++;
         break;
@@ -211,8 +216,8 @@ int fetch(const Device& d, SmValue* vals, char* err, size_t errLen) {
 
 void evaluateDevice(int di, bool ok, uint32_t now) {
   // Aufrufer hält s_lock
-  const Device& d = R->cfg.devices[di];
-  DevRuntime& dr = R->dev[di];
+  const Device& d = deviceOf(R->cfg, di);
+  DevRuntime& dr = runtimeOf(di);
   rules::DevEvent de = rules::deviceResult(dr.dev, ok, R->cfg.settings.offlineAfterFails, now);
   if (de != rules::DevEvent::NONE && d.offlineAlert) {
     char text[mesh_actions::MAX_TEXT + 1];
@@ -374,6 +379,42 @@ void rebasePings() {
   xSemaphoreGive(s_lock);
 }
 
+// Chiptemperatur des ESP32-S3 (E30): alle 60 s messen, Regeln auswerten (auch
+// ohne WLAN - Meldungen gehen per Funk), stündlich ins Ereignis-Log.
+void measureInternal(bool evaluate) {
+  static uint32_t lastMs = 0, lastLogMs = 0;
+  static bool first = true;
+  uint32_t now = millis();
+  if (!first && now - lastMs < INTERNAL_INTERVAL_MS) return;
+  lastMs = now;
+  float t = temperatureRead();
+  bool ok = !isnan(t) && t > -40 && t < 150;
+  s_chipTemp = ok ? t : NAN;
+  if (ok && (first || now - lastLogMs >= 3600000UL)) {
+    lastLogMs = now;
+    event_log::addf("SYS", "Chiptemperatur %.1f \xC2\xB0" "C", t);   // °C (UTF-8)
+  }
+  first = false;
+  xSemaphoreTake(s_lock, portMAX_DELAY);
+  DevRuntime& dr = R->internal;
+  dr.everPolled = true;
+  dr.lastPollMs = now;
+  if (ok) {
+    dr.nValues = 1;
+    strlcpy(dr.values[0].path, INTERNAL_PATH_CHIP_TEMP, sizeof(dr.values[0].path));
+    dr.values[0].sensorName[0] = 0;
+    dr.values[0].value = t;
+    dr.lastOkMs = now;
+    dr.everOk = true;
+    dr.error[0] = 0;
+  } else {
+    dr.nValues = 0;
+    strlcpy(dr.error, "Sensor liefert keinen Wert", sizeof(dr.error));
+  }
+  if (evaluate) evaluateDevice(INTERNAL_DEVICE, ok, now);
+  xSemaphoreGive(s_lock);
+}
+
 void task(void*) {
   static SmValue vals[MAX_VALUES];
   for (;;) {
@@ -382,6 +423,7 @@ void task(void*) {
     syncConfig();
     bool enabled = R->cfg.settings.enabled;
     xSemaphoreGive(s_lock);
+    measureInternal(enabled);
     if (!enabled) continue;
     // Ohne eigenes WLAN gar nicht abfragen: sonst würde jedes Sensormeter als
     // "nicht erreichbar" gezählt und per Funk (geht ja weiter) gemeldet,
@@ -461,7 +503,7 @@ bool sm_poller::sendTest(int ruleIdx, String& err) {
   if (!r.used) {
     err = "Regel unbekannt (erst speichern)";
   } else {
-    const Device& d = R->cfg.devices[r.device];
+    const Device& d = deviceOf(R->cfg, r.device);
     RuleRuntime& rt = R->rule[ruleIdx];
     const char* tpl = tplOr(r.text, tplOr(R->cfg.settings.alertText, DEFAULT_ALERT));
     char body[mesh_actions::MAX_TEXT - 6];
@@ -490,41 +532,49 @@ static void esc(String& out, const char* s) {
   }
 }
 
+float sm_poller::chipTempC() { return s_chipTemp; }
+
+// Ein Gerät als JSON (Sensormeter und Pseudo-Gerät INTERNAL_DEVICE). Aufrufer hält s_lock.
+static void devJson(String& out, int i, const DevRuntime& d, uint32_t now) {
+  out += "{\"idx\":" + String(i);
+  out += ",\"polled\":" + String(d.everPolled ? "true" : "false");
+  out += ",\"online\":" + String(d.everOk && !d.dev.offline && d.dev.fails == 0 ? "true" : "false");
+  out += ",\"offline\":" + String(d.dev.offline ? "true" : "false");
+  out += ",\"fails\":" + String(d.dev.fails);
+  out += ",\"lastOkAgoS\":" + (d.everOk ? String((now - d.lastOkMs) / 1000) : String("null"));
+  out += ",\"error\":\"";
+  esc(out, d.error);
+  out += "\",\"values\":[";
+  for (int k = 0; k < d.nValues; k++) {
+    if (k) out += ',';
+    out += "{\"path\":\"";
+    esc(out, d.values[k].path);
+    out += "\",\"sensor\":\"";
+    esc(out, d.values[k].sensorName);
+    out += "\",\"label\":\"";
+    esc(out, rules::labelFor(d.values[k].path));
+    out += "\",\"unit\":\"";
+    esc(out, rules::unitFor(d.values[k].path));
+    out += "\",\"value\":" + String(d.values[k].value, 2) + "}";
+  }
+  out += "]}";
+}
+
 void sm_poller::statusJson(String& out) {
   out += "{\"devices\":[";
-  if (!R) { out += "],\"rules\":[]}"; return; }
+  if (!R) { out += "],\"internal\":null,\"rules\":[],\"pings\":[],\"limit\":{\"used\":0,\"max\":0}}"; return; }
   xSemaphoreTake(s_lock, portMAX_DELAY);
   uint32_t now = millis();
   bool first = true;
   for (int i = 0; i < MAX_DEVICES; i++) {
     if (!R->cfg.devices[i].used) continue;
-    const DevRuntime& d = R->dev[i];
     if (!first) out += ',';
     first = false;
-    out += "{\"idx\":" + String(i);
-    out += ",\"polled\":" + String(d.everPolled ? "true" : "false");
-    out += ",\"online\":" + String(d.everOk && !d.dev.offline && d.dev.fails == 0 ? "true" : "false");
-    out += ",\"offline\":" + String(d.dev.offline ? "true" : "false");
-    out += ",\"fails\":" + String(d.dev.fails);
-    out += ",\"lastOkAgoS\":" + (d.everOk ? String((now - d.lastOkMs) / 1000) : String("null"));
-    out += ",\"error\":\"";
-    esc(out, d.error);
-    out += "\",\"values\":[";
-    for (int k = 0; k < d.nValues; k++) {
-      if (k) out += ',';
-      out += "{\"path\":\"";
-      esc(out, d.values[k].path);
-      out += "\",\"sensor\":\"";
-      esc(out, d.values[k].sensorName);
-      out += "\",\"label\":\"";
-      esc(out, rules::labelFor(d.values[k].path));
-      out += "\",\"unit\":\"";
-      esc(out, rules::unitFor(d.values[k].path));
-      out += "\",\"value\":" + String(d.values[k].value, 2) + "}";
-    }
-    out += "]}";
+    devJson(out, i, R->dev[i], now);
   }
-  out += "],\"rules\":[";
+  out += "],\"internal\":";
+  devJson(out, INTERNAL_DEVICE, R->internal, now);
+  out += ",\"rules\":[";
   first = true;
   for (int i = 0; i < MAX_RULES; i++) {
     if (!R->cfg.rules[i].used) continue;
@@ -557,3 +607,4 @@ void sm_poller::statusJson(String& out) {
   out += "],\"limit\":{\"used\":" + String(R->limiter.usedInWindow(now)) + ",\"max\":" + String(R->cfg.settings.maxPerHour) + "}}";
   xSemaphoreGive(s_lock);
 }
+

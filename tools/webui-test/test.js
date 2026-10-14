@@ -119,7 +119,8 @@ async function runCli(page, cmd) {
     // Schlüssel des privaten Kanals anzeigen
     await page.$$eval('#chBody tr', rows => rows.find(r => r.children[0].textContent === 'sensormeter').querySelector('button.chip').click());
     const keyShown = await page.$$eval('#chBody tr', rows => rows.find(r => r.children[0].textContent === 'sensormeter').children[4].textContent);
-    check('Kanäle: Schlüssel als Base64', keyShown === 'ABEiM0RVZneImaq7zN3u/w==', keyShown);
+    // Hex wie in der MeshCore-App, Base64 nur als Zusatz (Nutzer hielt Base64 für einen anderen Schlüssel)
+    check('Kanäle: Schlüssel als Hex (wie App) + Base64', keyShown === '00112233445566778899aabbccddeeffBase64: ABEiM0RVZneImaq7zN3u/w==', keyShown);
     // Nachricht senden + Empfang
     await page.select('#msgCh', '1');
     check('Kanäle: Hinweis nennt Scope', (await t('#msgHint')).includes('rhein-main'), await t('#msgHint'));
@@ -143,7 +144,7 @@ async function runCli(page, cmd) {
     await setVal('#sdHost', '10.10.0.148');
     await page.click('#sdSave');
     check('SM: echtes Gerät online mit Temperatur', await until(async () => {
-      const r = await rows('#smDevBody'); return r.length === 1 && r[0][2].startsWith('✓') && /Temperatur \d+(\.\d)?°C/.test(r[0][3]);
+      const r = await rows('#smDevBody'); return r.length === 2 && r[0][2].startsWith('✓') && /Temperatur \d+(\.\d)?°C/.test(r[0][3]);
     }, 15000), JSON.stringify(await rows('#smDevBody')));
     // Simuliertes heißes Gerät mit Passwort
     await setVal('#sdName', 'Heizraum');
@@ -151,7 +152,7 @@ async function runCli(page, cmd) {
     await setVal('#sdUser', 'admin');
     await setVal('#sdPass', 'geheim');
     await page.click('#sdSave');
-    check('SM: zweites Gerät', await until(async () => (await rows('#smDevBody')).length === 2));
+    check('SM: zweites Gerät', await until(async () => (await rows('#smDevBody')).length === 3));
     // Ungültige Adresse
     await setVal('#sdName', 'Kaputt');
     await setVal('#sdHost', 'bad host');
@@ -202,12 +203,27 @@ async function runCli(page, cmd) {
     await until(async () => (await t('#sdMsg')) === 'Gerät gespeichert');
     const kept = await page.evaluate(async () => { const r = await fetch('/api/sm'); return (await r.json()).config.devices[1]; });
     check('SM: Intervall geändert, Passwort weiter gesetzt', kept.intervalS === 30 && kept.pass === '***', JSON.stringify(kept));
+    // Pseudo-Gerät „Gateway (intern)“ (E30): feste letzte Zeile, Regel auf Chiptemperatur
+    const devRows = await rows('#smDevBody');
+    check('SM: Gateway-intern-Zeile mit Chiptemperatur', devRows.length === 3 && devRows[2][0] === 'Gateway (intern)' &&
+          /Chiptemperatur 52\.3°C/.test(devRows[2][3]), JSON.stringify(devRows[2]));
+    check('Status: Chiptemperatur angezeigt', (await t('#g_chip')) === '52.3 °C', await t('#g_chip'));
+    await page.select('#srDev', '100');
+    await until(async () => (await page.$$eval('#srPath option', o => o.map(x => x.value))).includes('gateway.chipTemp'));
+    await page.select('#srPath', 'gateway.chipTemp');
+    await setVal('#srThr', '40');
+    await setVal('#srText', '');
+    await page.select('#srCh', 'sensormeter');
+    await page.click('#srSave');
+    check('SM: Regel auf Gateway intern -> ALARM', await until(async () => { const r = await rows('#smRuleBody'); return r.length === 3 && r[2][0].startsWith('Gateway (intern)') && r[2][3].startsWith('ALARM'); }),
+          JSON.stringify(await rows('#smRuleBody')));
+    check('SM: Meldung Chiptemperatur im Log', await until(async () => (await t('#smLog')).includes('sensormeter -> ALARM Gateway: Chiptemperatur 52.3°C (>40°C)')), (await t('#smLog')).slice(-160));
     await page.screenshot({ path: out + '/10_sensormeter.png', fullPage: true });
     // Gerät 0 löschen -> Regel 2 (Büro) weg, Regel 1 zeigt jetzt auf Gerät 0
     await page.$$eval('#smDevBody tr', r => r[0].querySelectorAll('button')[2].click());
     check('SM: Gerät gelöscht + Regel umnummeriert', await until(async () => {
       const c = await page.evaluate(async () => (await (await fetch('/api/sm')).json()).config);
-      return c.devices.length === 1 && c.rules.length === 1 && c.rules[0].device === 0 && c.devices[0].name === 'Heizraum';
+      return c.devices.length === 1 && c.rules.length === 2 && c.rules[0].device === 0 && c.rules[1].device === 100 && c.devices[0].name === 'Heizraum';
     }));
 
     // Kanal-Zuordnung per Name (E24): Kanal löschen -> Regel zeigt "fehlt",

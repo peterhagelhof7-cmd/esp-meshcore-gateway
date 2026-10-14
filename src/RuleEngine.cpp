@@ -172,7 +172,7 @@ static const char* lastPart(const char* path) {
 
 const char* unitFor(const char* path) {
   const char* k = lastPart(path);
-  if (!strcmp(k, "temperature")) return "\xC2\xB0" "C";   // °C (UTF-8)
+  if (!strcmp(k, "temperature") || !strcmp(k, "chipTemp")) return "\xC2\xB0" "C";   // °C (UTF-8)
   if (!strcmp(k, "humidity")) return "%";
   if (!strcmp(k, "pressureHpa")) return "hPa";
   if (!strcmp(k, "lux")) return "lx";
@@ -183,6 +183,7 @@ const char* unitFor(const char* path) {
 const char* labelFor(const char* path) {
   const char* k = lastPart(path);
   if (!strcmp(k, "temperature")) return "Temperatur";
+  if (!strcmp(k, "chipTemp")) return "Chiptemperatur";
   if (!strcmp(k, "humidity")) return "Feuchte";
   if (!strcmp(k, "pressureHpa")) return "Luftdruck";
   if (!strcmp(k, "lux")) return "Helligkeit";

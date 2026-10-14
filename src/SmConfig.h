@@ -14,6 +14,12 @@ static const int MAX_PINGS = 5;
 static const uint16_t PING_INTERVAL_MIN_S = 10;    // Prüfabstand je Ziel: 10..3600 s
 static const uint16_t PING_INTERVAL_MAX_S = 3600;
 static const uint16_t PING_INTERVAL_DEF_S = 10;
+// Pseudo-Gerät "Gateway (intern)" (E30): Regeln mit device == INTERNAL_DEVICE
+// werten Messwerte des Gateways selbst aus (Chiptemperatur). Kein Eintrag in
+// devices[], wird auch ohne WLAN gemessen.
+static const int INTERNAL_DEVICE = 100;
+static const char* const INTERNAL_PATH_CHIP_TEMP = "gateway.chipTemp";
+static const uint32_t INTERNAL_INTERVAL_MS = 60000;
 
 struct Device {
   bool used;
@@ -72,6 +78,9 @@ struct Config {
   Rule rules[MAX_RULES];
   PingTarget pings[MAX_PINGS];
 };
+
+// Gerät zu einem Regel-Index, inkl. Pseudo-Gerät INTERNAL_DEVICE.
+const Device& deviceOf(const Config& c, int idx);
 
 void begin();
 // Kopie (für den Poller). Rückgabe: Generation (ändert sich bei jeder Änderung).

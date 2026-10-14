@@ -30,7 +30,19 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check('Formular: keine Scheinänderung', f.save === true && f.msg === '', JSON.stringify(f.msg));
 
   await page.click('nav a[data-v=sm]').catch(() => {});
-  await sleep(2000);
+  const intRow = async () => page.$$eval('#smDevBody tr', r => { const x = r.find(t => t.children[0].textContent === 'Gateway (intern)'); return x ? [...x.children].map(c => c.textContent) : null; });
+  check('Überwachung: Zeile Gateway (intern) mit Chiptemperatur', await waitFor(async () => { const r = await intRow(); return r && /Chiptemperatur \d+(\.\d)?°C/.test(r[3]); }), JSON.stringify(await intRow()));
+  check('Status: Chiptemperatur', /^\d+(\.\d)? °C$/.test(await text('#g_chip')), await text('#g_chip'));
+
+  // Private Kanäle: Anzeige = Hex wie in der App (nur lesen, klickt nur „anzeigen“)
+  await page.click('nav a[data-v=channels]');
+  await waitFor(async () => (await page.$$eval('#chBody tr', r => r.length)) > 0);
+  const api = await page.evaluate(async () => (await (await fetch('/api/channels')).json()).channels.filter(c => c.kind === 'private'));
+  for (const c of api) {
+    const shown = await page.$$eval('#chBody tr', (rows, n) => { const r = rows.find(x => x.children[0].textContent === n); r.querySelector('button.chip').click(); return r.children[4].textContent; }, c.name);
+    check('Kanal ' + c.name + ': Schlüssel als Hex angezeigt', shown.startsWith(c.key_hex) && /^[0-9a-f]{32}$/.test(c.key_hex), shown);
+  }
+  await sleep(1000);
   check('Keine JS-Fehler', errors.length === 0, errors.join(' | '));
   await page.screenshot({ path: process.env.TEMP + '/claude/live_settings.png', fullPage: true });
   await browser.close();

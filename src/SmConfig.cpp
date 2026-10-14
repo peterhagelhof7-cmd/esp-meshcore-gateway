@@ -98,7 +98,7 @@ static bool parse(const char* json, size_t len, const Config& old, Config& c, St
     cpy(x.channel, sizeof(x.channel), r["channel"] | "");
     x.notifyRecovery = r["notifyRecovery"] | true;
     cpy(x.text, sizeof(x.text), r["text"] | "");
-    if (x.device < 0 || x.device >= MAX_DEVICES || !c.devices[x.device].used) {
+    if (x.device != INTERNAL_DEVICE && (x.device < 0 || x.device >= MAX_DEVICES || !c.devices[x.device].used)) {
       err = "Regel " + String(i + 1) + ": Gerät ungültig"; return false;
     }
     if (!x.path[0] || !strchr(x.path, '.')) { err = "Regel " + String(i + 1) + ": Messwert fehlt"; return false; }
@@ -192,6 +192,13 @@ static void serialize(const Config& c, String& out, bool maskPass) {
   String tmp;
   serializeJson(doc, tmp);
   out += tmp;
+}
+
+const Device& deviceOf(const Config& c, int idx) {
+  // {device} in Meldungen = "Gateway"; host "intern" macht sameDevice() stabil.
+  static const Device internal = {true, true, "Gateway", "intern", 0, "", "", 60, false};
+  if (idx == INTERNAL_DEVICE) return internal;
+  return c.devices[idx >= 0 && idx < MAX_DEVICES ? idx : 0];
 }
 
 void begin() {
