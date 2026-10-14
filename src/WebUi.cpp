@@ -138,7 +138,9 @@ static void handleStatus(AsyncWebServerRequest* req) {
   j += WiFi.macAddress();
   j += "\",\"hostname\":\"";
   j += jsonEscape(network.hostname());
-  j += "\"}}";
+  j += "\",\"hostname_auto\":";
+  j += network.hostnameAuto() ? "true" : "false";
+  j += "}}";
 
   req->send(200, "application/json", j);
 }
@@ -192,7 +194,8 @@ static void handleWifiSave(AsyncWebServerRequest* req) {
   // (das Formular zeigt gespeicherte Passwörter nie an).
   if (!(pass.length() == 0 && ssid == s.wifiSsid)) s.wifiPass = pass;
   s.wifiSsid = ssid;
-  if (host.length() > 0) s.hostname = NetworkManager::sanitizeHostname(host);
+  // Leer = automatisch (folgt dem Gerätenamen), fehlt das Feld = unverändert.
+  if (req->hasParam("hostname", true)) s.hostname = GatewayConfig::hostSetting(host);
   s.wifiPendingTest = true;
   gw_config.set(s);
   event_log::addf("SYS", "WLAN-Einstellungen gespeichert (%s), Neustart", ssid.c_str());
@@ -485,8 +488,8 @@ static void handleBackupApply(AsyncWebServerRequest* req) {
     }
     if (req->hasParam("pass", true)) s.wifiPass = pass;
     s.wifiSsid = ssid;
-    String host = formParam(req, "hostname");
-    if (host.length() > 0) s.hostname = NetworkManager::sanitizeHostname(host);
+    // Backups bis 0.7.3 enthalten "meshcore-gw" -> automatisch (hostSetting)
+    if (req->hasParam("hostname", true)) s.hostname = GatewayConfig::hostSetting(formParam(req, "hostname"));
     s.wifiPendingTest = true;
     gw_config.set(s);
     event_log::addf("SYS", "WLAN/Hostname aus Backup übernommen (%s)", ssid.c_str());
@@ -531,7 +534,7 @@ static void handleLogDownload(AsyncWebServerRequest* req) {
         return n;
       });
   if (!req->hasParam("inline")) {
-    String name = "meshcore-gw-log-" + gw_config.get().hostname + ".txt";
+    String name = "meshcore-gw-log-" + network.hostname() + ".txt";
     r->addHeader("Content-Disposition", "attachment; filename=\"" + name + "\"");
   }
   r->addHeader("Cache-Control", "no-store");

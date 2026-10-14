@@ -564,3 +564,25 @@ Chiptemperatur 51,7 °C, Log-Zeile, Schlüssel `sps-alarm` = Hex aus der App.
 PC-Test mit dem echten Code (21×6-Zeichenraster statt OLED): leer, empfangen mit Umlauten, gesendeter
 Alarm ohne Uhrzeit, Überlänge mit Emoji und Langwort. Dabei gefunden und behoben: Umbruch trennte mitten im
 Wort, wenn das letzte Leerzeichen in der ersten Zeilenhälfte lag. Auf dem Gerät noch nicht gesehen.
+
+## E32 – Hostname folgt dem Gerätenamen (2026-10-14, User: „bau variante 2“), 0.7.4
+
+- Anlass: WLAN-Name `meshcore-gw` wich vom LoRa-Namen `DE-BY-SUL02-SPS-GW` ab. Beide waren getrennte
+  Einstellungen, der Hostname war mit `meshcore-gw` vorbelegt.
+- Gespeicherter Hostname **leer = automatisch**: wirksamer Hostname = bereinigter MeshCore-Gerätename
+  (a-z, 0-9, „-“, Leerzeichen/_ → „-“, max. 31 Zeichen wegen des 32-Byte-Puffers im WLAN-Treiber; bleibt nichts
+  übrig → `meshcore-gw`). Ein eigener Hostname bleibt möglich (Haken „wie Gerätename (LoRa)“ entfernen).
+- **Migration:** Der alte Werkswert `meshcore-gw` (wurde beim WLAN-Einrichten immer mitgespeichert) gilt als
+  automatisch, beim Laden aus NVS, beim Speichern und beim Einspielen alter Backups (`GatewayConfig::hostSetting`).
+  Folge: `meshcore-gw` lässt sich nicht als fester eigener Name wählen.
+- **Zur Laufzeit:** `NetworkManager` prüft jede Sekunde den Gerätenamen (egal ob per Web, CLI oder Fern-Admin
+  geändert). Ist er 3 s stabil anders, wird der Hostname gesetzt, ins Ereignis-Log geschrieben und die Station
+  verbindet kurz neu (`WiFi.reconnect()`), damit DHCP den neuen Namen an den Router meldet. Kein Neustart.
+- Der Hostname liegt als `char[32]` unter Spinlock, weil der Web-Task ihn liest, während der loopTask ihn ändern kann.
+- API: `/api/status` → `wifi.hostname` (wirksam) + `wifi.hostname_auto`; `/api/wifi` mit `hostname` leer =
+  automatisch, Feld fehlt = unverändert; Backup `gw.hostname` leer = automatisch. Status-Tab: „… (wie Gerätename)“.
+- Die Fritzbox kann den alten Namen weiter anzeigen, bis sie den Eintrag aktualisiert (Heimnetz → Netzwerk).
+
+**Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün, UI-Test 131/131 (neu: automatisch =
+Gerätename, Feld gesperrt, Status-Hinweis, folgt `set name`, eigener Name bereinigt gespeichert, zurück auf
+automatisch, Altwert `meshcore-gw`, Backup leer, Log-Dateiname). Am Gerät noch offen.

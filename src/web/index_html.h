@@ -354,7 +354,8 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <label for="pass">Passwort (leer lassen = gespeichertes behalten)</label>
 <input id="pass" name="pass" type="password" maxlength="63" autocomplete="new-password">
 <label for="hostname">Hostname</label>
-<input id="hostname" name="hostname" maxlength="32">
+<label class="chk"><input type="checkbox" id="hostAuto" checked> wie Gerätename (LoRa)</label>
+<input id="hostname" name="hostname" maxlength="31" pattern="[A-Za-z0-9 _\-]*" title="Buchstaben, Ziffern, -" disabled>
 <div class="row">
 <button type="button" class="sec" id="scanBtn">Netze suchen</button>
 <button type="submit">Speichern &amp; neu starten</button>
@@ -447,13 +448,13 @@ async function refresh(){
     set('p_err',p.recv_errors);
     const modes={station:'Verbunden',installer_ap:'Installer-AP',connecting:'Verbinde …'};
     set('w_mode',modes[w.mode]||w.mode);set('w_ssid',w.ssid);set('w_ip',w.ip);
-    set('w_rssi',w.rssi?w.rssi+' dBm':null);set('w_host',w.hostname);set('w_mac',w.mac);
+    set('w_rssi',w.rssi?w.rssi+' dBm':null);set('w_host',w.hostname+(w.hostname_auto?' (wie Gerätename)':''));set('w_mac',w.mac);
     set('g_heap',Math.round(j.gateway.free_heap/1024)+' KB');
     set('g_chip',typeof j.gateway.chip_temp_c==='number'?j.gateway.chip_temp_c.toFixed(1)+' °C':null);
     set('fw_ver',j.gateway.version+' (MeshCore '+n.firmware+')');set('fw_proj',j.gateway.project);
     set('fw_part',j.gateway.partition+' · '+j.gateway.image_state);
     $('wifiPill').textContent=(modes[w.mode]||w.mode)+' · '+w.ip;
-    if(!hostTouched&&!$('hostname').value)$('hostname').value=w.hostname;
+    if(!hostTouched){$('hostAuto').checked=w.hostname_auto!==false;$('hostname').value=w.hostname;$('hostname').disabled=$('hostAuto').checked}
   }catch(e){$('wifiPill').textContent='keine Verbindung'}
 }
 
@@ -571,10 +572,12 @@ async function scan(){
 }
 $('ssidSel').onchange=e=>{if(e.target.value)$('ssid').value=e.target.value};
 $('hostname').oninput=()=>hostTouched=true;
+$('hostAuto').onchange=()=>{hostTouched=true;$('hostname').disabled=$('hostAuto').checked;if(!$('hostAuto').checked)$('hostname').focus()};
 $('scanBtn').onclick=scan;
 $('wifiForm').onsubmit=async e=>{
   e.preventDefault();
   const body=new URLSearchParams(new FormData(e.target));
+  body.set('hostname',$('hostAuto').checked?'':$('hostname').value.trim());   // leer = automatisch
   const r=await fetch('/api/wifi',{method:'POST',body});
   const j=await r.json().catch(()=>({}));
   if(r.ok){$('wifiMsg').textContent='Gespeichert. Das Gateway startet neu und verbindet sich mit dem WLAN. Klappt das nicht innerhalb von 30 s, kommt der Installer-AP zurück.';$('wifiMsg').className='msg ok'}
@@ -1237,7 +1240,7 @@ $('bkFile').onchange=async e=>{
       (bkChannels.length?'\n\nKanäle: '+bkChannels.map(c=>c.name+(c.scope?' ['+c.scope+']':'')).join(', '):'')+
       (bkSm?'\nÜberwachung: '+bkSm.devices.length+' Geräte, '+bkSm.rules.length+' Regeln, '+(bkSm.pings||[]).length+' Ping-Ziele':'')+
       (acl?'\nZugriffsliste: '+acl+' Einträge':'')+
-      (bkGw?'\nGateway: Hostname '+bkGw.hostname+', WLAN „'+bkGw.wifi.ssid+'“'+(typeof bkGw.wifi.pass==='string'?' (mit Passwort)':' (ohne Passwort)'):'')+
+      (bkGw?'\nGateway: Hostname '+(bkGw.hostname&&bkGw.hostname!=='meshcore-gw'?bkGw.hostname:'automatisch (wie Gerätename)')+', WLAN „'+bkGw.wifi.ssid+'“'+(typeof bkGw.wifi.pass==='string'?' (mit Passwort)':' (ohne Passwort)'):'')+
       (bkAdm?'\nAdmin-Passwort: enthalten':'');
     $('bkRestore').disabled=false;$('bkMsg').textContent=bkCmds.length+' Befehle bereit';$('bkMsg').className='msg';
   }catch(err){$('bkMsg').textContent='Datei ungültig: '+err.message;$('bkMsg').className='msg bad'}

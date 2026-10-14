@@ -362,7 +362,7 @@ async function runCli(page, cmd) {
         JSON.stringify(bk.sensormeter && bk.sensormeter.devices));
   check('Backup (voll): Admin-, Gast-, WLAN-Passwort', bk.version === 2 && bk.secrets === true && bk.adminPassword === 'password' &&
         bk.commands.some(c => c.startsWith('set guest.password')) && bk.gw && bk.gw.wifi.ssid === 'TestNetz' && bk.gw.wifi.pass === 'geheim123' &&
-        bk.gw.hostname === 'meshcore-gw', JSON.stringify(bk.gw));
+        bk.gw.hostname === '', JSON.stringify(bk.gw));
   check('Backup: ACL als setperm', bk.commands.includes('setperm c0ffee' + '11'.repeat(29) + ' 3'), bk.commands.filter(c => c.startsWith('setperm')).join());
   // Backup ohne Haken: keine Geheimnisse
   fs.renameSync(path.join(dl, fs.readdirSync(dl).find(f => f.endsWith('.json'))), path.join(dl, 'voll.json.bak'));
@@ -409,7 +409,7 @@ async function runCli(page, cmd) {
   const ex2 = await page.evaluate(async () => (await fetch('/api/backup/extra?secrets=1')).json());
   check('Restore: WLAN/Hostname/Admin-Passwort wieder wie im Backup', await waitFor(async () => {
     const e = await page.evaluate(async () => (await fetch('/api/backup/extra?secrets=1')).json());
-    return e.wifi.ssid === 'TestNetz' && e.wifi.pass === 'geheim123' && e.hostname === 'meshcore-gw' && e.adminPassword === 'password';
+    return e.wifi.ssid === 'TestNetz' && e.wifi.pass === 'geheim123' && e.hostname === '' && e.adminPassword === 'password';
   }), JSON.stringify(ex2));
   // Backup ohne WLAN-Passwort und andere SSID -> Option gesperrt
   await page.evaluate(() => fetch('/api/backup/apply', { method: 'POST', body: new URLSearchParams({ ssid: 'AnderesNetz', pass: 'x' }) }));
@@ -462,6 +462,34 @@ async function runCli(page, cmd) {
     const old = path.join(dl, 'alt.bin');
     fs.writeFileSync(old, Buffer.concat([Buffer.alloc(5000), Buffer.from('MCGW-FW-ID:MESHCORE-GW-HELTEC-V4:0.0.1:MCGW-FW-END'), Buffer.alloc(5000)]));
 
+    // ---------- Hostname folgt Gerätename (E32) ----------
+    await page.click('nav a[data-v=wifi]');
+    const st = async () => (await page.evaluate(async () => (await fetch('/api/status')).json())).wifi;
+    const devName = (await page.evaluate(async () => (await fetch('/api/status')).json())).node.name;
+    const expHost = devName.toLowerCase().replace(/[ _]+/g, '-').replace(/[^a-z0-9-]/g, '');
+    check('Hostname: automatisch = Gerätename', await until(async () => {
+      const w = await st(); return w.hostname_auto === true && w.hostname === expHost; }), JSON.stringify(await st()) + ' / ' + devName);
+    check('Hostname: Haken gesetzt, Feld gesperrt mit wirksamem Namen', await until(async () => page.evaluate(n =>
+      hostAuto.checked && hostname.disabled && hostname.value === n, expHost)), await page.$eval('#hostname', e => e.value));
+    check('Hostname: Status zeigt „(wie Gerätename)“', await until(async () => (await t('#w_host')) === expHost + ' (wie Gerätename)'), await t('#w_host'));
+    await runCli(page, 'set name Werk Statt_GW2');
+    check('Hostname: folgt neuem Gerätenamen', await until(async () => (await st()).hostname === 'werk-statt-gw2'), (await st()).hostname);
+    await runCli(page, 'set name ' + devName);
+    await page.$eval('#ssid', e => e.value = 'TestNetz');
+    await page.click('#hostAuto');
+    check('Hostname: Haken weg -> Feld frei', !(await page.$eval('#hostname', e => e.disabled)));
+    await page.$eval('#hostname', e => e.value = '');
+    await page.type('#hostname', 'Eigener Name');
+    await page.$eval('#wifiForm', f => f.requestSubmit());
+    check('Hostname: eigener Name gespeichert (bereinigt)', await until(async () => {
+      const w = await st(); return w.hostname === 'eigener-name' && w.hostname_auto === false; }), JSON.stringify(await st()));
+    await page.click('#hostAuto');
+    await page.$eval('#wifiForm', f => f.requestSubmit());
+    check('Hostname: Haken wieder an -> automatisch', await until(async () => (await st()).hostname_auto === true), JSON.stringify(await st()));
+    await page.evaluate(() => fetch('/api/wifi', { method: 'POST', body: new URLSearchParams({ ssid: 'TestNetz', hostname: 'meshcore-gw' }) }));
+    check('Hostname: alter Werkswert meshcore-gw = automatisch', await until(async () => (await st()).hostname_auto === true), JSON.stringify(await st()));
+    await page.reload({ waitUntil: 'networkidle0' });
+
     await page.click('nav a[data-v=wifi]');
     check('OTA: Board angezeigt', await until(async () => (await t('#fw_proj')) === 'MESHCORE-GW-HELTEC-V4'), await t('#fw_proj'));
     const upload = async (file, force) => {
@@ -493,7 +521,8 @@ async function runCli(page, cmd) {
     check('Log: Größe angezeigt', await until(async () => / KB von 128 KB$/.test(await t('#lg_size'))), await t('#lg_size'));
     check('Log: Download-Link', (await page.$eval('#lgDown', e => e.getAttribute('href'))) === '/api/log/download');
     const lg = await page.evaluate(async () => { const r = await fetch('/api/log/download'); return { cd: r.headers.get('Content-Disposition'), body: await r.text() }; });
-    check('Log: als Datei mit Hostname', lg.cd === 'attachment; filename="meshcore-gw-log-meshcore-gw.txt"', lg.cd);
+    const hn = (await page.evaluate(async () => (await fetch('/api/status')).json())).wifi.hostname;
+    check('Log: als Datei mit Hostname', lg.cd === 'attachment; filename="meshcore-gw-log-' + hn + '.txt"', lg.cd);
     check('Log: enthält Befehle, Ping-Alarm, Systemmeldung', /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d CMD   set tx 5$/m.test(lg.body) &&
           /MELD  #test -> PING-ALARM Testziel/.test(lg.body) && / SYS   Gateway gestartet/.test(lg.body), lg.body.slice(0, 300));
     check('Log: Passwörter/Schlüssel nie im Klartext', !lg.body.includes('temp1') && !lg.body.includes('geheim123') && !/abababab/.test(lg.body) &&

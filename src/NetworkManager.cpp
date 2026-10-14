@@ -40,10 +40,62 @@ String NetworkManager::sanitizeHostname(const String& name) {
       out += '-';
     }
   }
-  while (out.length() > 0 && out[out.length() - 1] == '-') out.remove(out.length() - 1);
   while (out.length() > 0 && out[0] == '-') out.remove(0, 1);
-  if (out.isEmpty()) out = "meshcore-gw";
+  if (out.length() > 31) out.remove(31);
+  while (out.length() > 0 && out[out.length() - 1] == '-') out.remove(out.length() - 1);
+  if (out.isEmpty()) out = FALLBACK_HOSTNAME;
   return out;
+}
+
+String NetworkManager::hostname() const {
+  char buf[sizeof(_hostname)];
+  portENTER_CRITICAL(&_hostMux);
+  memcpy(buf, _hostname, sizeof(buf));
+  portEXIT_CRITICAL(&_hostMux);
+  return String(buf);
+}
+
+void NetworkManager::setHostnameNow(const String& h) {
+  char buf[sizeof(_hostname)];
+  strlcpy(buf, h.c_str(), sizeof(buf));
+  portENTER_CRITICAL(&_hostMux);
+  memcpy(_hostname, buf, sizeof(buf));
+  portEXIT_CRITICAL(&_hostMux);
+}
+
+bool NetworkManager::hostnameAuto() const {
+  return gw_config.get().hostname.isEmpty();
+}
+
+String NetworkManager::wantedHostname() const {
+  const GatewaySettings& s = gw_config.get();
+  if (!s.hostname.isEmpty()) return s.hostname;
+  return sanitizeHostname(_nameSource ? String(_nameSource()) : String());
+}
+
+// Automatischer Hostname: Gerätename geändert (Web, CLI, Fern-Admin) ->
+// 3 s abwarten (Antwort an den Browser), dann übernehmen. Die Station
+// verbindet kurz neu, damit DHCP den neuen Namen an den Router meldet.
+void NetworkManager::followDeviceName(unsigned long now) {
+  if (now - _hostCheckMs < 1000) return;
+  _hostCheckMs = now;
+  String want = wantedHostname();
+  if (want == hostname()) {
+    _hostChangedMs = 0;
+    return;
+  }
+  if (_hostChangedMs == 0) {
+    _hostChangedMs = now;
+    return;
+  }
+  if (now - _hostChangedMs < 3000) return;
+  _hostChangedMs = 0;
+  String old = hostname();
+  setHostnameNow(want);
+  WiFi.setHostname(want.c_str());
+  event_log::addf("NET", "Hostname %s -> %s (folgt Gerätename)", old.c_str(), want.c_str());
+  Serial.printf("[NET] Hostname %s -> %s\n", old.c_str(), want.c_str());
+  if (_gotIp && !_apActive) WiFi.reconnect();
 }
 
 void NetworkManager::onEvent(WiFiEvent_t event) {
@@ -89,7 +141,7 @@ void NetworkManager::startInstallerAp() {
 
 void NetworkManager::begin() {
   GatewaySettings s = gw_config.get();
-  _hostname = sanitizeHostname(s.hostname);
+  setHostnameNow(wantedHostname());
 
   WiFi.onEvent(onEvent);
   WiFi.mode(WIFI_MODE_STA);
@@ -97,7 +149,7 @@ void NetworkManager::begin() {
   // Modem-Sleep aus: bei sensormeter-wlan auf HW beobachtete Drops ~alle 20 s
   // (siehe Memory "WLAN stability fixes").
   WiFi.setSleep(false);
-  WiFi.setHostname(_hostname.c_str());
+  WiFi.setHostname(hostname().c_str());
 
   if (s.wifiPendingTest) {
     _checkTimeoutMs = WLAN_TEST_TIMEOUT_MS;
@@ -123,6 +175,7 @@ void NetworkManager::begin() {
 void NetworkManager::loop() {
   const GatewaySettings& s = gw_config.get();
   unsigned long now = millis();
+  followDeviceName(now);
 
   if (_apActive) {
     if (_gotIp) {
