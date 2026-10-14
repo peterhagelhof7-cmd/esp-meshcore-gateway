@@ -33,6 +33,8 @@ input,select{width:100%;padding:8px 10px;border:1px solid var(--line);border-rad
 .row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
 button{padding:8px 14px;border:1px solid var(--acc);background:var(--acc);color:#fff;border-radius:6px;font:inherit;cursor:pointer}
 button.sec{background:transparent;color:var(--acc)}
+[hidden]{display:none!important}
+a.btn{display:inline-block;padding:8px 14px;border:1px solid var(--acc);border-radius:6px;text-decoration:none;color:var(--acc)}
 button.chip{padding:4px 10px;font-size:13px;background:transparent;color:var(--fg);border-color:var(--line)}
 button:disabled{opacity:.5;cursor:default}
 .msg{margin-top:10px;font-size:13px;min-height:1em}
@@ -325,13 +327,17 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 
 <section>
 <h2>Backup &amp; Wiederherstellen</h2>
-<label class="chk"><input type="checkbox" id="bkKey"> privaten Schlüssel einschließen</label>
+<label class="chk"><input type="checkbox" id="bkKey"> Schlüssel und Passwörter einschließen (vollständiges Backup)</label>
 <div class="row"><button type="button" class="sec" id="bkDown">Backup herunterladen</button></div>
 <label for="bkFile">Backup-Datei einspielen</label>
 <input type="file" id="bkFile" accept=".json,application/json">
+<div id="bkOpts" hidden>
+<label class="chk" id="bkAdmL"><input type="checkbox" id="bkAdm" checked> Admin-Passwort übernehmen (danach neu anmelden)</label>
+<label class="chk" id="bkWifiL"><input type="checkbox" id="bkWifi"> WLAN und Hostname übernehmen (Neustart)</label>
+</div>
 <div class="row"><button type="button" id="bkRestore" disabled>Wiederherstellen</button><span class="msg" id="bkMsg" style="margin:0"></span></div>
 <pre class="out" id="bkOut" hidden></pre>
-<p class="hint">Das Backup ist eine Liste offizieller CLI-Befehle (Einstellungen + Regionen) plus Kanäle und Sensormeter-Konfiguration des Gateways. Nicht enthalten: Admin-Passwort (per CLI nicht auslesbar), WLAN-Zugangsdaten. Mit Schlüssel ist die Datei geheim zu halten.</p>
+<p class="hint">Immer enthalten: alle MeshCore-Einstellungen und Regionen als offizielle CLI-Befehle, Zugriffsliste (ACL, <code>setperm</code>), Kanäle, Überwachung (Sensormeter, Regeln, Ping-Ziele), Hostname und WLAN-Name. <b>Nur mit Haken</b> zusätzlich: privater Schlüssel (Knoten-Identität), Admin- und Gast-Passwort, WLAN-Passwort, Sensormeter-Passwörter. Eine solche Datei ist geheim zu halten. Nicht enthalten: Nachbarn, Statistiken, Logs.</p>
 </section>
 </div>
 </div>
@@ -376,6 +382,17 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 </form>
 <p class="hint">Nur Dateien mit passendem Gateway-Merkmal werden angenommen (gleiches Board, keine ältere Version). Die neue Firmware muss 60 s stabil laufen, sonst startet automatisch wieder die vorherige.</p>
 </section>
+
+<section style="margin-top:16px">
+<h2>Ereignis-Log</h2>
+<dl>
+<dt>Belegt</dt><dd id="lg_size">–</dd>
+<dt>Noch im RAM</dt><dd id="lg_pend">–</dd>
+<dt>Zuletzt geschrieben</dt><dd id="lg_last">–</dd>
+</dl>
+<div class="row"><a class="btn sec" id="lgDown" href="/api/log/download">Herunterladen</a><a class="btn sec" id="lgView" href="/api/log/download?inline=1" target="_blank" rel="noopener">Anzeigen</a><button type="button" class="sec" id="lgClear">Löschen</button><span class="msg" id="lgMsg" style="margin:0"></span></div>
+<p class="hint">Dauerhaft im Flash, übersteht Neustarts: Starts mit Grund (auch Abstürze), WLAN-Ereignisse, Befehle aus Web und serieller Konsole (Geheimnisse ausgeblendet), Meldungen der Überwachung, gesendete Kanalnachrichten, Updates. Paketverkehr und empfangene Kanalnachrichten stehen nur in den Live-Logs. Flash-schonend: höchstens 128 KB (2 × 64 KB im Wechsel, ältestes fällt weg), geschrieben wird gesammelt ab 4 KB, spätestens alle 15 min und vor jedem Neustart. Bei Absturz oder Stromausfall fehlen höchstens die letzten 15 min.</p>
+</section>
 </div>
 
 <script>
@@ -395,6 +412,7 @@ function show(v){
   if(v==='settings')openSettings();
   if(v==='channels')loadChannels();
   if(v==='sm')smLoad();
+  if(v==='wifi')lgLoad();
   tick();
 }
 window.onhashchange=()=>show(location.hash.slice(1));
@@ -1133,58 +1151,80 @@ function regionCmds(txt){
   if(cmds.length)cmds.push('region save');
   return cmds;
 }
+// Backup v2 (E28): CLI-Befehle + ACL + Kanäle + Überwachung + Gateway (Hostname/WLAN),
+// mit Haken zusätzlich Geheimnisse (prv.key, Admin-/Gast-/WLAN-/Sensormeter-Passwörter).
+const SECRET_KEYS=['guest.password'];
 $('bkDown').onclick=async()=>{
   $('bkMsg').textContent='Lese Einstellungen …';$('bkMsg').className='msg';
   try{
-    const gets=FK.map(f=>'get '+f.k).concat(['region']);
     const withKey=$('bkKey').checked;
+    const fk=FK.filter(f=>withKey||!SECRET_KEYS.includes(f.k));
+    const gets=fk.map(f=>'get '+f.k).concat(['region']);
     if(withKey)gets.push('get prv.key');
     const rep=await runJob(gets,true);
     const cmds=[];
-    FK.forEach((f,i)=>{const r=rep[i].reply;if(isErr(r))return;let v=val(r).replace(/%$/,'');
+    fk.forEach((f,i)=>{const r=rep[i].reply;if(isErr(r))return;let v=val(r).replace(/%$/,'');
       if(f.t==='radio'){const p=v.split(',');v=[parseFloat(p[0]),parseFloat(p[1]),parseInt(p[2]),parseInt(p[3])].join(',')}
       cmds.push(setCmd(f,v))});
-    cmds.push(...regionCmds(rep[FK.length].reply));
-    if(withKey){const k=val(rep[FK.length+1].reply);if(/^[0-9a-fA-F]{64,}$/.test(k))cmds.push('set prv.key '+k)}
+    cmds.push(...regionCmds(rep[fk.length].reply));
+    if(withKey){const k=val(rep[fk.length+1].reply);if(/^[0-9a-fA-F]{64,}$/.test(k))cmds.push('set prv.key '+k)}
+    const ex=await (await fetch('/api/backup/extra?secrets='+(withKey?1:0),{cache:'no-store'})).json();
+    ex.acl.forEach(a=>cmds.push('setperm '+a.pubkey+' '+a.perm));
     const st=await (await fetch('/api/status',{cache:'no-store'})).json();
     const chs=(await (await fetch('/api/channels',{cache:'no-store'})).json()).channels
       .map(c=>({kind:c.kind,name:c.name,key:c.kind==='private'?c.key_b64:'',scope:c.scope}));
-    // Sensormeter-Konfig (E24). Geräte-Passwörter liefert die API nur maskiert ->
-    // nicht sichern (Sensormeter brauchen für /api/sensors ohnehin keinen Login).
-    const smc=(await (await fetch('/api/sm',{cache:'no-store'})).json()).config;
-    smc.devices.forEach(d=>{if(d.pass==='***')d.pass=''});
-    const file={format:'meshcore-gateway-backup',version:1,created:new Date().toISOString(),
-      node:st.node.name,pubkey:st.node.pubkey,meshcore:st.node.firmware,gateway:st.gateway.version,commands:cmds,channels:chs,sensormeter:smc};
+    const smc=ex.sensormeter;
+    smc.devices.forEach(d=>{if(d.pass==='***')d.pass=''});   // ohne Haken: Passwort leer lassen
+    const file={format:'meshcore-gateway-backup',version:2,created:new Date().toISOString(),secrets:withKey,
+      node:st.node.name,pubkey:st.node.pubkey,meshcore:st.node.firmware,gateway:st.gateway.version,commands:cmds,channels:chs,sensormeter:smc,
+      gw:{hostname:ex.hostname,wifi:ex.wifi}};
+    if(withKey)file.adminPassword=ex.adminPassword;
     const a=document.createElement('a');
     a.href=URL.createObjectURL(new Blob([JSON.stringify(file,null,2)],{type:'application/json'}));
-    a.download='meshcore-gw-'+st.node.name.replace(/[^A-Za-z0-9_-]+/g,'_')+'-'+file.created.slice(0,10)+'.json';
+    a.download='meshcore-gw-'+st.node.name.replace(/[^A-Za-z0-9_-]+/g,'_')+'-'+file.created.slice(0,10)+(withKey?'-VOLL':'')+'.json';
     document.body.appendChild(a);a.click();a.remove();
-    $('bkMsg').textContent=cmds.length+' Befehle gesichert'+(withKey?' (mit Schlüssel!)':'');$('bkMsg').className='msg ok';
+    $('bkMsg').textContent=cmds.length+' Befehle, '+chs.length+' Kanäle, '+ex.acl.length+' ACL-Einträge gesichert'+(withKey?' (mit Schlüssel und Passwörtern!)':'');$('bkMsg').className='msg ok';
   }catch(e){$('bkMsg').textContent='Backup fehlgeschlagen: '+e.message;$('bkMsg').className='msg bad'}
 };
-let bkCmds=null,bkChannels=[],bkSm=null;
+let bkCmds=null,bkChannels=[],bkSm=null,bkGw=null,bkAdm='';
 $('bkFile').onchange=async e=>{
-  bkCmds=null;$('bkRestore').disabled=true;$('bkOut').hidden=true;
+  bkCmds=null;$('bkRestore').disabled=true;$('bkOut').hidden=true;$('bkOpts').hidden=true;
   const f=e.target.files[0];if(!f)return;
   try{
     const j=JSON.parse(await f.text());
     if(j.format!=='meshcore-gateway-backup'||!Array.isArray(j.commands))throw new Error('kein Gateway-Backup');
-    const allowed=/^(set [a-z.]+ |region (put|denyf|home|save)\b)/;
+    const allowed=/^(set [a-z.]+ |region (put|denyf|home|save)\b|setperm [0-9a-f]{64} \d{1,3}$)/;
     const bad=j.commands.filter(c=>typeof c!=='string'||!allowed.test(c));
     if(bad.length)throw new Error('unerwartete Befehle: '+bad.slice(0,3).join(', '));
     bkCmds=j.commands;bkChannels=Array.isArray(j.channels)?j.channels:[];
     bkSm=(j.sensormeter&&Array.isArray(j.sensormeter.devices)&&Array.isArray(j.sensormeter.rules))?j.sensormeter:null;
+    bkGw=(j.gw&&j.gw.wifi&&j.gw.wifi.ssid)?j.gw:null;
+    bkAdm=typeof j.adminPassword==='string'?j.adminPassword:'';
+    // WLAN nur anbieten, wenn das Passwort drin ist oder die SSID gleich bleibt
+    const st=await (await fetch('/api/status',{cache:'no-store'})).json().catch(()=>null);
+    const wifiOk=bkGw&&(typeof bkGw.wifi.pass==='string'||(st&&st.wifi&&st.wifi.ssid===bkGw.wifi.ssid));
+    $('bkWifiL').hidden=!bkGw;$('bkWifi').checked=false;$('bkWifi').disabled=!wifiOk;
+    $('bkWifiL').title=wifiOk?'':'WLAN-Passwort nicht im Backup und anderes WLAN';
+    $('bkAdmL').hidden=!bkAdm;$('bkAdm').checked=true;
+    $('bkOpts').hidden=!bkGw&&!bkAdm;
+    const mask=c=>c.startsWith('set prv.key ')?'set prv.key ••••••••':(c.startsWith('set guest.password ')?'set guest.password ••••':c);
+    const acl=bkCmds.filter(c=>c.startsWith('setperm ')).length;
     $('bkOut').hidden=false;
-    $('bkOut').textContent='Backup von '+j.node+' ('+j.created+')\n\n'+bkCmds.map(c=>c.startsWith('set prv.key ')?'set prv.key ••••••••':c).join('\n')+
+    $('bkOut').textContent='Backup von '+j.node+' ('+j.created+')'+(j.secrets?' – mit Schlüssel und Passwörtern':'')+'\n\n'+bkCmds.map(mask).join('\n')+
       (bkChannels.length?'\n\nKanäle: '+bkChannels.map(c=>c.name+(c.scope?' ['+c.scope+']':'')).join(', '):'')+
-      (bkSm?'\nSensormeter: '+bkSm.devices.length+' Geräte, '+bkSm.rules.length+' Regeln':'');
+      (bkSm?'\nÜberwachung: '+bkSm.devices.length+' Geräte, '+bkSm.rules.length+' Regeln, '+(bkSm.pings||[]).length+' Ping-Ziele':'')+
+      (acl?'\nZugriffsliste: '+acl+' Einträge':'')+
+      (bkGw?'\nGateway: Hostname '+bkGw.hostname+', WLAN „'+bkGw.wifi.ssid+'“'+(typeof bkGw.wifi.pass==='string'?' (mit Passwort)':' (ohne Passwort)'):'')+
+      (bkAdm?'\nAdmin-Passwort: enthalten':'');
     $('bkRestore').disabled=false;$('bkMsg').textContent=bkCmds.length+' Befehle bereit';$('bkMsg').className='msg';
   }catch(err){$('bkMsg').textContent='Datei ungültig: '+err.message;$('bkMsg').className='msg bad'}
 };
 $('bkRestore').onclick=async()=>{
   if(!bkCmds)return;
   const key=bkCmds.some(c=>c.startsWith('set prv.key '));
-  if(!confirm('Backup einspielen? Aktuelle Einstellungen werden überschrieben.'+(key?'\n\nACHTUNG: enthält einen privaten Schlüssel, die Knoten-Identität wird ersetzt.':'')))return;
+  const adm=bkAdm&&$('bkAdm').checked, wifi=bkGw&&$('bkWifi').checked&&!$('bkWifi').disabled;
+  if(!confirm('Backup einspielen? Aktuelle Einstellungen werden überschrieben.'+(key?'\n\nACHTUNG: enthält einen privaten Schlüssel, die Knoten-Identität wird ersetzt.':'')+
+    (adm?'\n\nDas Admin-Passwort wird übernommen, danach neu anmelden.':'')+(wifi?'\n\nWLAN und Hostname werden übernommen, das Gateway startet neu.':'')))return;
   $('bkRestore').disabled=true;$('bkMsg').textContent='Spiele ein …';$('bkMsg').className='msg';
   try{
     const rep=await runJob(bkCmds,false);
@@ -1195,15 +1235,41 @@ $('bkRestore').onclick=async()=>{
       try{await postForm('/api/channels',{action:'add',kind:c.kind,name:c.name,key:c.key||'',scope:c.scope||''})}
       catch(e){if(!/existiert schon/.test(e.message))bad++}
     }
-    if(bkSm){   // nach den Kanälen: Regeln verweisen per Name auf sie
+    if(bkSm){   // nach den Kanälen: Regeln verweisen per Name auf sie. Leeres Passwort = keins.
       const r=await fetch('/api/sm/save',{method:'POST',body:new URLSearchParams({json:JSON.stringify(bkSm)})});
       if(!r.ok)bad++;
     }
-    loadChannels();
-    $('bkMsg').textContent=bad?bad+' Befehl(e) abgelehnt':'Eingespielt';$('bkMsg').className='msg '+(bad?'bad':'ok');
-    loadSettings();loadProfile();loadRegions();
+    let tail='';
+    if(adm||wifi){   // zuletzt: danach gilt der alte Login nicht mehr bzw. Neustart
+      const p={};
+      if(adm)p.adminPassword=bkAdm;
+      if(wifi){p.ssid=bkGw.wifi.ssid;p.hostname=bkGw.hostname||'';if(typeof bkGw.wifi.pass==='string')p.pass=bkGw.wifi.pass}
+      try{await postForm('/api/backup/apply',p);tail=(adm?' · Admin-Passwort übernommen, bitte neu anmelden':'')+(wifi?' · WLAN übernommen, Neustart':'')}
+      catch(e){bad++;tail=' · '+e.message}
+    }
+    if(!adm&&!wifi){loadChannels();loadSettings();loadProfile();loadRegions()}
+    $('bkMsg').textContent=(bad?bad+' Schritt(e) abgelehnt':'Eingespielt')+tail;$('bkMsg').className='msg '+(bad?'bad':'ok');
+    // Erledigt: Auswahl zurücksetzen, sonst löst dieselbe Datei kein change mehr aus
+    bkCmds=null;$('bkFile').value='';$('bkOpts').hidden=true;
+    return;
   }catch(e){$('bkMsg').textContent='Fehler: '+e.message;$('bkMsg').className='msg bad'}
   $('bkRestore').disabled=false;
+};
+
+/* ---------- Ereignis-Log (E27) ---------- */
+const kb=b=>(b/1024).toFixed(b<10240?1:0)+' KB';
+async function lgLoad(){
+  try{const j=await (await fetch('/api/log/info',{cache:'no-store'})).json();
+    set('lg_size',kb(j.fileBytes)+' von '+kb(j.maxBytes)+(j.dropped?' · '+j.dropped+' Zeilen verworfen':''));
+    set('lg_pend',kb(j.pendingBytes)+' (wird ab 4 KB oder nach '+Math.round(j.flushIntervalS/60)+' min geschrieben)');
+    set('lg_last',j.lastFlushAgoS===null?'seit Start noch nicht':'vor '+ago(j.lastFlushAgoS)+' ('+j.flushes+'× seit Start)');
+  }catch(e){}
+}
+$('lgClear').onclick=async()=>{
+  if(!confirm('Ereignis-Log im Flash löschen?'))return;
+  try{await postForm('/api/log/clear',{});$('lgMsg').textContent='Gelöscht';$('lgMsg').className='msg ok'}
+  catch(e){$('lgMsg').textContent='Fehler: '+e.message;$('lgMsg').className='msg bad'}
+  lgLoad();
 };
 
 buildForm();

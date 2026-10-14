@@ -262,11 +262,11 @@ bool setFromJson(const char* json, size_t len, String& err) {
   return ok;
 }
 
-void toJson(String& out) {
+void toJson(String& out, bool maskPass) {
   Config* c = (Config*)malloc(sizeof(Config));
-  if (!c) { out = "{}"; return; }
+  if (!c) { out += "{}"; return; }
   copy(*c);
-  serialize(*c, out, true);
+  serialize(*c, out, maskPass);
   free(c);
 }
 

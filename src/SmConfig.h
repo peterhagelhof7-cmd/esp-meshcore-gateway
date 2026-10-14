@@ -81,8 +81,9 @@ uint32_t generation();
 // Komplette Konfiguration aus JSON übernehmen (Web). Passwort "***" = altes
 // behalten. false = ungültig, err enthält den Grund.
 bool setFromJson(const char* json, size_t len, String& err);
-// Als JSON (Passwörter maskiert).
-void toJson(String& out);
+// Als JSON. maskPass = Passwörter als "***" (Standard). Unmaskiert nur fürs
+// Backup mit Geheimnissen.
+void toJson(String& out, bool maskPass = true);
 
 // Standardvorlagen
 extern const char* DEFAULT_ALERT;

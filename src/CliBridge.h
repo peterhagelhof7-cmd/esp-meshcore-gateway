@@ -28,4 +28,17 @@ namespace cli_bridge {
 
   // Nur aus dem loopTask. true, wenn dabei ein Job fertig wurde.
   bool process();
+
+  // Befehle mit Geheimnis im Argument oder in der Antwort (Passwörter,
+  // privater Schlüssel, Bridge-Secret).
+  bool isSecretCommand(const char* cmd);
+  // "set prv.key abc" -> "set prv.key ********", "password x" -> "password ********".
+  // Abfragen (get ...) bleiben unverändert. Ergebnis in einem statischen
+  // Puffer, nur aus dem loopTask verwenden.
+  const char* maskedCommand(const char* cmd);
+
+  // Zugriffsliste (ACL) aus /s_contacts: Text "PP <pubkey-hex>" je Zeile,
+  // wie "get acl" seriell. Datei wird von MeshCore verzögert geschrieben.
+  struct AclEntry { uint8_t perm; char pubkeyHex[65]; };
+  int readAcl(AclEntry* out, int max);
 }

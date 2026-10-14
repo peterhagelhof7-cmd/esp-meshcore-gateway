@@ -1,4 +1,5 @@
 #include "NetworkManager.h"
+#include "EventLog.h"
 #include "GatewayConfig.h"
 
 #include <esp_sntp.h>
@@ -50,10 +51,15 @@ void NetworkManager::onEvent(WiFiEvent_t event) {
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       Serial.print("[NET] WLAN-IP: ");
       Serial.println(WiFi.localIP());
+      event_log::addf("NET", "WLAN verbunden (%s), IP %s, RSSI %d dBm", WiFi.SSID().c_str(),
+                      WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
       network._gotIp = true;
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      if (network._gotIp) Serial.println("[NET] WLAN-Verbindung verloren");
+      if (network._gotIp) {
+        Serial.println("[NET] WLAN-Verbindung verloren");
+        event_log::add("NET", "WLAN-Verbindung verloren");
+      }
       network._gotIp = false;
       break;
     default:
@@ -75,6 +81,7 @@ void NetworkManager::startInstallerAp() {
   if (_apActive) {
     Serial.print("[NET] Installer-AP \"installer\" aktiv, IP ");
     Serial.println(WiFi.softAPIP());
+    event_log::add("NET", "Installer-AP \"installer\" aktiv (192.168.4.1)");
   } else {
     Serial.println("[NET] Installer-AP konnte nicht gestartet werden");
   }
@@ -123,6 +130,7 @@ void NetworkManager::loop() {
       WiFi.mode(WIFI_MODE_STA);
       _apActive = false;
       Serial.println("[NET] Konfiguriertes WLAN erreicht -> Installer-AP aus");
+      event_log::add("NET", "Konfiguriertes WLAN erreicht, Installer-AP aus");
       return;
     }
     if (s.wifiSsid.length() > 0 && now - _lastRejoinMs > AP_REJOIN_INTERVAL_MS) {

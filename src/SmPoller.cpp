@@ -104,7 +104,7 @@ const char* tplOr(const char* t, const char* def) { return (t && *t) ? t : def; 
 void ruleText(const Rule& r, const Device& d, const RuleRuntime& rt, const char* state, const char* tpl,
               char* out, size_t outLen) {
   rules::TemplateVars v{d.name, rules::labelFor(r.path), rt.st.lastValue, rt.st.hasValue,
-                        rules::unitFor(r.path), r.op ? rules::Op::BELOW : rules::Op::ABOVE, r.threshold, state};
+                        rules::unitFor(r.path), r.op ? rules::Op::BELOW : rules::Op::ABOVE, r.threshold, state, nullptr};
   rules::renderTemplate(tpl, v, out, outLen);
 }
 
@@ -217,7 +217,7 @@ void evaluateDevice(int di, bool ok, uint32_t now) {
   if (de != rules::DevEvent::NONE && d.offlineAlert) {
     char text[mesh_actions::MAX_TEXT + 1];
     rules::TemplateVars v{d.name, "", 0, false, "", rules::Op::ABOVE, 0,
-                          de == rules::DevEvent::OFFLINE ? "OFFLINE" : "ONLINE"};
+                          de == rules::DevEvent::OFFLINE ? "OFFLINE" : "ONLINE", nullptr};
     const char* tpl = de == rules::DevEvent::OFFLINE ? tplOr(R->cfg.settings.offlineText, DEFAULT_OFFLINE)
                                                      : tplOr(R->cfg.settings.onlineText, DEFAULT_ONLINE);
     rules::renderTemplate(tpl, v, text, sizeof(text));

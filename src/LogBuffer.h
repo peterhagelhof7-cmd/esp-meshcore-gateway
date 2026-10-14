@@ -21,6 +21,11 @@ public:
   explicit LogBuffer(size_t capacity);
   bool begin();   // Speicher (bevorzugt PSRAM) holen
 
+  // Optional: jede Zeile zusätzlich weiterreichen (dauerhaftes Ereignis-Log,
+  // E27). Wird außerhalb des Locks im Kontext des Schreibers aufgerufen.
+  typedef void (*Mirror)(char type, const char* text);
+  void setMirror(Mirror m) { _mirror = m; }
+
   void push(char type, uint32_t epoch, const char* text);
   // Wie push(), teilt aber an Zeilenumbrüchen und zu langen Zeilen in
   // mehrere Einträge.
@@ -37,6 +42,7 @@ private:
   Line* _lines = nullptr;
   uint32_t _nextSeq = 1;
   SemaphoreHandle_t _lock = nullptr;
+  Mirror _mirror = nullptr;
 };
 
 extern LogBuffer console_log;   // CLI-Befehle, Antworten, Systemmeldungen

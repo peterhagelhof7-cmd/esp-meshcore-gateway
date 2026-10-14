@@ -4,10 +4,12 @@
 #include <ESPAsyncWebServer.h>
 #include <WiFi.h>
 
+#include <memory>
 #include <vector>
 
 #include "ChannelStore.h"
 #include "CliBridge.h"
+#include "EventLog.h"
 #include "GatewayConfig.h"
 #include "GatewayStatus.h"
 #include "LogBuffer.h"
@@ -419,6 +421,125 @@ static void handleSmGet(AsyncWebServerRequest* req) {
   req->send(200, "application/json", j);
 }
 
+// Backup-Teile, die nicht über die CLI lesbar sind (E28): Hostname/WLAN,
+// Admin-Passwort, Zugriffsliste (ACL), Sensormeter-Passwörter.
+// Geheimnisse nur mit ?secrets=1.
+static void handleBackupExtra(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  bool secrets = req->hasParam("secrets") && req->getParam("secrets")->value() == "1";
+  const GatewaySettings& g = gw_config.get();
+  String j;
+  j.reserve(8192);
+  j += "{\"hostname\":\"" + jsonEscape(g.hostname) + "\",\"wifi\":{\"ssid\":\"" + jsonEscape(g.wifiSsid) + "\"";
+  if (secrets) j += ",\"pass\":\"" + jsonEscape(g.wifiPass) + "\"";
+  j += "}";
+  if (secrets) {
+    MeshSnapshot s = gateway_status::get();
+    j += ",\"adminPassword\":\"" + jsonEscape(String(s.adminPassword)) + "\"";
+  }
+  j += ",\"acl\":[";
+  cli_bridge::AclEntry* acl = (cli_bridge::AclEntry*)malloc(sizeof(cli_bridge::AclEntry) * 32);
+  int n = acl ? cli_bridge::readAcl(acl, 32) : 0;
+  for (int i = 0; i < n; i++) {
+    if (i) j += ',';
+    j += "{\"perm\":" + String(acl[i].perm) + ",\"pubkey\":\"" + acl[i].pubkeyHex + "\"}";
+  }
+  free(acl);
+  j += "],\"sensormeter\":";
+  sm::toJson(j, !secrets);
+  j += '}';
+  req->send(200, "application/json", j);
+}
+
+// Letzter Schritt einer Wiederherstellung: Admin-Passwort und/oder WLAN.
+// Serverseitig in einem Rutsch, weil der Browser nach der Passwortänderung
+// keinen gültigen Login mehr hat (E28).
+static void handleBackupApply(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String pw = formParam(req, "adminPassword");
+  String ssid = formParam(req, "ssid");
+  ssid.trim();
+  if (pw.length() > 0) {
+    bool ok = pw.length() <= 15;
+    for (size_t i = 0; i < pw.length(); i++) ok = ok && pw[i] > ' ';
+    if (!ok) {
+      req->send(400, "application/json", "{\"error\":\"Admin-Passwort: 1-15 Zeichen, keine Leerzeichen\"}");
+      return;
+    }
+  }
+  if (req->hasParam("ssid", true)) {
+    String pass = formParam(req, "pass");
+    if (ssid.length() == 0 || ssid.length() > 32 || pass.length() > 63) {
+      req->send(400, "application/json", "{\"error\":\"SSID 1-32 Zeichen, Passwort max. 63 Zeichen\"}");
+      return;
+    }
+    GatewaySettings s = gw_config.get();
+    // Ohne Passwort im Backup nur bei gleicher SSID (altes Passwort bleibt).
+    if (!req->hasParam("pass", true) && ssid != s.wifiSsid) {
+      req->send(400, "application/json", "{\"error\":\"WLAN-Passwort fehlt im Backup\"}");
+      return;
+    }
+    if (req->hasParam("pass", true)) s.wifiPass = pass;
+    s.wifiSsid = ssid;
+    String host = formParam(req, "hostname");
+    if (host.length() > 0) s.hostname = NetworkManager::sanitizeHostname(host);
+    s.wifiPendingTest = true;
+    gw_config.set(s);
+    event_log::addf("SYS", "WLAN/Hostname aus Backup übernommen (%s)", ssid.c_str());
+    s_rebootAt = millis() + 3000;   // Passwort-Job vorher noch abarbeiten lassen
+  }
+  if (pw.length() > 0) {
+    String cmd = "password " + pw;
+    if (!cli_bridge::submitOne(cmd.c_str())) {
+      req->send(503, "application/json", "{\"error\":\"CLI ausgelastet\"}");
+      return;
+    }
+  }
+  req->send(200, "application/json", String("{\"ok\":true,\"reboot\":") + (req->hasParam("ssid", true) ? "true" : "false") + "}");
+}
+
+static void handleLogInfo(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  event_log::Info i = event_log::info();
+  String j = "{\"fileBytes\":" + String(i.fileBytes) + ",\"pendingBytes\":" + String(i.pendingBytes) +
+             ",\"maxBytes\":" + String(2 * event_log::FILE_MAX_BYTES) +
+             ",\"lastFlushAgoS\":" + (i.lastFlushAgoS == 0xFFFFFFFFUL ? String("null") : String(i.lastFlushAgoS)) +
+             ",\"flushIntervalS\":" + String(event_log::FLUSH_INTERVAL_MS / 1000) +
+             ",\"flushes\":" + String(i.flushes) + ",\"dropped\":" + String(i.dropped) + "}";
+  req->send(200, "application/json", j);
+}
+
+static void handleLogDownload(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  size_t len = 0;
+  char* raw = event_log::snapshot(len);
+  if (!raw) {
+    req->send(503, "text/plain", "Kein Speicher frei");
+    return;
+  }
+  // Puffer lebt so lange wie die Antwort (shared_ptr in der Callback-Lambda).
+  std::shared_ptr<char> buf(raw, free);
+  AsyncWebServerResponse* r = req->beginResponse("text/plain; charset=utf-8", len,
+      [buf, len](uint8_t* out, size_t maxLen, size_t index) -> size_t {
+        if (index >= len) return 0;
+        size_t n = std::min(maxLen, len - index);
+        memcpy(out, buf.get() + index, n);
+        return n;
+      });
+  if (!req->hasParam("inline")) {
+    String name = "meshcore-gw-log-" + gw_config.get().hostname + ".txt";
+    r->addHeader("Content-Disposition", "attachment; filename=\"" + name + "\"");
+  }
+  r->addHeader("Cache-Control", "no-store");
+  req->send(r);
+}
+
+static void handleLogClear(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  event_log::clear();
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
 static void handleSmSave(AsyncWebServerRequest* req) {
   if (!checkAuth(req)) return;
   String json = formParam(req, "json");
@@ -492,6 +613,11 @@ void web_ui::begin() {
   server.on(AsyncURIMatcher::exact("/api/cli/job"), HTTP_GET, handleCliJob);
   server.on(AsyncURIMatcher::exact("/api/profile"), HTTP_GET, handleProfile);
   server.on(AsyncURIMatcher::exact("/api/ota"), HTTP_POST, handleOtaDone, handleOtaUpload);
+  server.on(AsyncURIMatcher::exact("/api/backup/extra"), HTTP_GET, handleBackupExtra);
+  server.on(AsyncURIMatcher::exact("/api/backup/apply"), HTTP_POST, handleBackupApply);
+  server.on(AsyncURIMatcher::exact("/api/log/info"), HTTP_GET, handleLogInfo);
+  server.on(AsyncURIMatcher::exact("/api/log/download"), HTTP_GET, handleLogDownload);
+  server.on(AsyncURIMatcher::exact("/api/log/clear"), HTTP_POST, handleLogClear);
   server.on(AsyncURIMatcher::exact("/api/sm"), HTTP_GET, handleSmGet);
   server.on(AsyncURIMatcher::exact("/api/sm/save"), HTTP_POST, handleSmSave);
   server.on(AsyncURIMatcher::exact("/api/sm/poll"), HTTP_POST, handleSmPoll);

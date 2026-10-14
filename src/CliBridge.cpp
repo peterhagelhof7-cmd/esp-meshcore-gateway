@@ -1,5 +1,6 @@
 #include "CliBridge.h"
 
+#include <SPIFFS.h>
 #include <esp_heap_caps.h>
 
 #include "GatewayMesh.h"
@@ -135,7 +136,8 @@ bool cli_bridge::process() {
   // CLI wiederholt es sogar in der Antwort) und "set prv.key <hex>".
   bool isPassword = memcmp(cmd, "password ", 9) == 0;
   bool isKeySet = memcmp(cmd, "set prv.key ", 12) == 0;
-  const char* logCmd = isPassword ? "password ********" : (isKeySet ? "set prv.key ********" : cmd);
+  char logCmd[MAX_CMD_LEN + 1];
+  strlcpy(logCmd, maskedCommand(cmd), sizeof(logCmd));
   if (log) console_log.push('c', now, logCmd);
 
   // handleCommand() verändert den Puffer (Tokenizer) -> Arbeitskopie.
@@ -143,7 +145,21 @@ bool cli_bridge::process() {
   strlcpy(work, cmd, sizeof(work));
   char reply[512];
   reply[0] = 0;
-  the_mesh.handleCommand(0, work, reply);   // sender_timestamp 0 = wie serielle CLI
+  if (strcmp(cmd, "get acl") == 0) {
+    // Upstream schreibt die Liste nur auf Serial -> hier aus der Datei.
+    AclEntry acl[32];
+    int n = readAcl(acl, 32);
+    size_t p = snprintf(reply, sizeof(reply), "ACL: %d Eintrag/Einträge", n);
+    for (int i = 0; i < n; i++) {
+      char line[80];
+      snprintf(line, sizeof(line), "\n%02X %s", acl[i].perm, acl[i].pubkeyHex);
+      if (log) console_log.push('r', now, line + 1);
+      if (p + strlen(line) < sizeof(reply)) { strcpy(reply + p, line); p += strlen(line); }
+    }
+    if (log) { console_log.push('r', now, "(Ende ACL)"); log = false; }
+  } else {
+    the_mesh.handleCommand(0, work, reply);   // sender_timestamp 0 = wie serielle CLI
+  }
   if (isPassword && memcmp(reply, "password now: ", 14) == 0) {
     strcpy(reply, "password now: ********");
   }
@@ -171,4 +187,49 @@ bool cli_bridge::process() {
   }
   xSemaphoreGive(s_lock);
   return finished;
+}
+
+static const char* const SECRET_PREFIXES[] = {
+  "password ", "set prv.key", "get prv.key", "set guest.password", "get guest.password",
+  "set bridge.secret", "get bridge.secret",
+};
+
+bool cli_bridge::isSecretCommand(const char* cmd) {
+  for (const char* p : SECRET_PREFIXES) {
+    if (strncmp(cmd, p, strlen(p)) == 0) return true;
+  }
+  return false;
+}
+
+const char* cli_bridge::maskedCommand(const char* cmd) {
+  static char buf[MAX_CMD_LEN + 1];
+  if (strncmp(cmd, "password ", 9) == 0) return "password ********";
+  if (strncmp(cmd, "set ", 4) != 0 || !isSecretCommand(cmd)) return cmd;
+  // "set <key> <wert>" -> Wert ersetzen
+  const char* sp = strchr(cmd + 4, ' ');
+  size_t n = sp ? (size_t)(sp - cmd) : strlen(cmd);
+  if (n > MAX_CMD_LEN - 9) n = MAX_CMD_LEN - 9;
+  memcpy(buf, cmd, n);
+  strcpy(buf + n, " ********");
+  return buf;
+}
+
+int cli_bridge::readAcl(AclEntry* out, int max) {
+  // Satzformat wie ClientACL::save(): pubkey[32] perm[1] sync_since[4]
+  // unused[2] out_path_len[1] out_path[64] shared_secret[32] = 136 Byte
+  static const size_t REC = 32 + 1 + 4 + 2 + 1 + 64 + 32;
+  if (!SPIFFS.exists("/s_contacts")) return 0;
+  File f = SPIFFS.open("/s_contacts", FILE_READ);
+  if (!f) return 0;
+  int n = 0;
+  uint8_t rec[REC];
+  while (n < max && f.read(rec, REC) == REC) {
+    if (rec[32] == 0) continue;   // gelöscht/Gast
+    out[n].perm = rec[32];
+    for (int i = 0; i < 32; i++) sprintf(&out[n].pubkeyHex[i * 2], "%02x", rec[i]);
+    out[n].pubkeyHex[64] = 0;
+    n++;
+  }
+  f.close();
+  return n;
 }

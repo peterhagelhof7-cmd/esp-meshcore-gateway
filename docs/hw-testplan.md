@@ -62,5 +62,14 @@ noch nichts geprüft. Reihenfolge so wählen, dass ein Fehler früh auffällt un
 - [ ] Ziel per Hostname (DNS) → IP wird angezeigt
 - [ ] Gerät kurz vom Netz (unter Schwelle) → keine Meldung; länger → Alarm, danach PING-OK
 
+## 8a. Backup/Restore + Ereignis-Log (M8)
+- [ ] Backup **mit** Haken → Datei enthält prv.key, adminPassword, gw.wifi.pass, guest.password; **ohne** Haken nichts davon
+- [ ] Mit der App einen Admin-Client anmelden → `get acl` in der Webkonsole zeigt ihn, Backup enthält `setperm …`
+- [ ] Backup auf **zweitem/gelöschtem** Gerät (nach `erase`) einspielen inkl. Admin-Passwort + WLAN → gleiche Identität (Public Key), gleiche Einstellungen, Kanäle, Überwachung, Login mit altem Passwort
+- [ ] Ereignis-Log: Neustart über Web → nach dem Start enthält das Log „=== Start (Software-Neustart)“ und die Zeilen davor (Shutdown-Flush)
+- [ ] Strom ziehen → nach Start „=== Start (Einschalten)“; Verlust höchstens der letzten 15 min
+- [ ] Log läuft über 64 KB (z. B. viele `ver` in der Webkonsole) → `/gwlog.1.txt` entsteht, Gesamtgröße bleibt ≤ 128 KB
+- [ ] WLAN-Router aus/an → NET-Zeilen „WLAN-Verbindung verloren“ / „WLAN verbunden“
+
 ## 9. Dauerlauf
 - [ ] 24 h laufen lassen: freier Heap stabil (Status-Tab), keine Neustarts (Laufzeit), WLAN stabil
