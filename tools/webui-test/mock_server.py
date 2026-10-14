@@ -184,7 +184,12 @@ class FakeCli:
 
     def run(self, cmd):
         if cmd == 'ver': return 'v1.17.1 (Build: 14 Aug 2026)'
-        if cmd == 'neighbors': return 'AB12CD34:1760000000:28\nEF56AB78:1760000100:-12'
+        # Format wie MyMesh::formatNeighborsReply: Kennung:Sekunden_her:SNR*4
+        if cmd == 'neighbors':
+            return 'AB12CD34:125:49\nEF56AB78:4000:-12' + ('\n1F2E3D4C:3:20' if getattr(self, 'discovered', False) else '')
+        if cmd == 'discover.neighbors':
+            self.discovered = True
+            return 'OK - Discover sent'
         if cmd.startswith('get '): return self.get(cmd[4:])
         if cmd.startswith('set '):
             k, _, v = cmd[4:].partition(' ')
@@ -549,7 +554,7 @@ def run_job(jid, cmds, quiet):
         time.sleep(0.01)
         with lock:
             rep = cli.run(c)
-        is_query = c.startswith('get ') or c.startswith('region get ') or c in ('region', 'ver')
+        is_query = c.startswith('get ') or c.startswith('region get ') or c in ('region', 'ver', 'neighbors')
         if not (quiet and is_query):
             masked = 'password ********' if c.startswith('password ') else ('set prv.key ********' if c.startswith('set prv.key ') else c)
             push('console', 'c', masked)

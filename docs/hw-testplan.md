@@ -48,6 +48,7 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 - [ ] OLED-Taste: kurz und lang → nur Seitenwechsel, **kein** Abschalten
 - [ ] OLED Seite 4/4 „Nachricht“: Nachricht in `#test` aus der App → Kanal, Uhrzeit, Text mit Umlauten; Alarm-Test → „gesendet“
 - [ ] Hostname automatisch: nach OTA 0.7.4 heißt das Gateway im WLAN `de-xx-ort02-gw` (Fritzbox, Status-Tab); `set name` ändern → Hostname zieht ohne Neustart nach (Ereignis-Log)
+- [ ] Nachbarn: nach OTA 0.7.5 steht nach ~2,5 min A1B2C3D4 im Status-Tab (Ereignis-Log „Nachbarsuche nach dem Start gesendet“); „Jetzt suchen“ → Countdown, Liste aktualisiert
 
 ## 7. Sensormeter (M6)
 - [ ] Privaten Kanal „sensormeter“ anlegen (Scope rhein-main ist vorbelegt), als Standardkanal setzen

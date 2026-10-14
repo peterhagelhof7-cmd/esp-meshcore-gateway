@@ -130,7 +130,8 @@ bool cli_bridge::process() {
   uint32_t now = the_mesh.getRTCClock()->getCurrentTime();
   // quiet: reine Abfragen (get/region get) nicht in die Konsole, Änderungen schon.
   bool isQuery = memcmp(cmd, "get ", 4) == 0 || memcmp(cmd, "region get ", 11) == 0 ||
-                 strcmp(cmd, "region") == 0 || strcmp(cmd, "ver") == 0;
+                 strcmp(cmd, "region") == 0 || strcmp(cmd, "ver") == 0 ||
+                 strcmp(cmd, "neighbors") == 0;   // Statusseite fragt alle 30 s (E34)
   bool log = !(quiet && isQuery);
   // Geheimnisse nicht im Konsolen-Log/seriell ablegen: "password <neu>" (die
   // CLI wiederholt es sogar in der Antwort) und "set prv.key <hex>".
