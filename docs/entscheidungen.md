@@ -586,3 +586,13 @@ Wort, wenn das letzte Leerzeichen in der ersten Zeilenhälfte lag. Auf dem Gerä
 **Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün, UI-Test 131/131 (neu: automatisch =
 Gerätename, Feld gesperrt, Status-Hinweis, folgt `set name`, eigener Name bereinigt gespeichert, zurück auf
 automatisch, Altwert `meshcore-gw`, Backup leer, Log-Dateiname). Am Gerät noch offen.
+
+## E33 – Repo öffentlich, Lizenz GPL-3.0 (2026-10-14, User: „auf public stellen“, Lizenz „GPL-3.0“)
+
+- Vor dem Umstellen die gesamte Historie auf Geheimnisse geprüft: keine Passwörter, kein privater Schlüssel,
+  keine WLAN-Daten. Kanalschlüssel `haus-alarm` nur gekürzt (4 von 16 Byte) in E30, private LAN-IPs und der
+  ohnehin per Funk öffentliche Knotenname bleiben.
+- Autor-E-Mail in allen Commits und Tags auf die GitHub-noreply-Adresse umgeschrieben (Inhalt und Datum gleich,
+  Commit-Kennungen neu). Sicherung vorher als Bundle außerhalb des Repos.
+- Versions-Tags `v0.1.0` … `v0.7.4` nachgezogen, jeweils auf dem Commit, der die Version einführt.
+- Lizenz GPL-3.0 (`LICENSE`); MeshCore-Anteile (Submodul, Logo, übernommene Stellen) bleiben MIT, Hinweis in `NOTICE`.
