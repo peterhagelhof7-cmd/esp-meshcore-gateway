@@ -434,3 +434,57 @@ User-Antwort zu E25: (1) Schwellwert = maximale Ausfallzeit **bestätigt**, (2) 
 **Verifikation:** Build V4 + R8 grün (0 Warnungen in src/), Host-Tests grün, UI-Test **100/100**
 (neu: Prüfabstand < 10 s abgelehnt, Schwellwert < Prüfabstand abgelehnt, Anzeige, Bearbeiten, Backup).
 Version 0.6.1. **Nicht HW-verifiziert.**
+
+## E27 – Dauerhaftes Ereignis-Log im Flash (2026-10-14, User: "log downloadbar, sinnvolle Größe, die den Flash schont")
+Bisher gab es nur RAM-Ringpuffer (Konsole, Pakete, Kanäle, Meldungen), die bei jedem Neustart leer sind.
+
+**Umsetzung (`src/EventLog.*`):**
+- Datei `/gwlog.txt` auf dem vorhandenen SPIFFS (3,4 MB, gemeinsam mit MeshCore), Wechsel zu `/gwlog.1.txt`
+  bei **64 KB**, also **höchstens 128 KB** (ca. 1500–2000 Zeilen). Das ältere Drittel fällt weg, nicht alles.
+- **Flash-Schonung:** Zeilen sammeln sich in einem 8-KB-RAM-Puffer (PSRAM). Geschrieben wird erst ab **4 KB**, spätestens
+  nach **15 min**, und vor jedem Neustart (`esp_register_shutdown_handler`, greift bei `ESP.restart()`, CLI `reboot`,
+  OTA). Bei normalem Betrieb (einige KB pro Tag) sind das wenige Schreibvorgänge pro Stunde. SPIFFS verteilt sie über
+  die ganze Partition, also kein messbarer Verschleiß. Preis: Bei Absturz oder Stromausfall fehlen höchstens die
+  letzten 15 min. Der Startgrund (`esp_reset_reason`, z. B. „ABSTURZ (Panic)“, „Task-Watchdog“, „Unterspannung“)
+  steht in der ersten Zeile nach jedem Start.
+- **Inhalt:** Systemmeldungen (Start, NTP, OTA, Profil), WLAN-Ereignisse, CLI-Befehle aus Web **und** serieller
+  Konsole mit Antwort, Meldungen der Überwachung (gesendet/unterdrückt), vom Gateway gesendete Kanalnachrichten.
+  **Nicht:** Paketverkehr und empfangene Kanalnachrichten (Volumen, bleiben in den Live-Logs).
+- **Geheimnisse:** `password …`, `set prv.key`, `set guest.password`, `set bridge.secret` werden maskiert, Antworten auf
+  `get prv.key`/`get guest.password`/`password` nie geschrieben. Dabei gefunden: Die **serielle** Konsole schrieb
+  `password <neu>` bisher im Klartext ins Web-Konsolen-Log. Jetzt ist es dort auch maskiert.
+- Zeilenformat `2026-10-14 07:12:03 CMD   set tx 17`, vor NTP `+12s SYS …`.
+- Web (System-Tab): Belegung, Herunterladen (`/api/log/download`, Dateiname mit Hostname), Anzeigen (`?inline=1`),
+  Löschen (`POST /api/log/clear`), Info (`/api/log/info`).
+- Upstream-Befehl `log start` (Paket-Log `/packet_log` von MeshCore) bleibt unverändert und unabhängig davon.
+
+## E28 – Backup vollständig (2026-10-14, User: "können alle Einstellungen heruntergeladen und wieder eingespielt werden?")
+Bisher fehlten: Admin-Passwort, WLAN/Hostname, Zugriffsliste (ACL), Sensormeter-Passwörter.
+Upstream gibt die ACL nur seriell aus (`get acl` → `Serial.printf`), das Admin-Passwort ist per CLI nicht lesbar.
+
+**Umsetzung (Backup-Format version 2, abwärtskompatibel beim Einspielen von v1):**
+- `GET /api/backup/extra[?secrets=1]` liefert Hostname, WLAN-SSID, ACL (aus `/s_contacts`, Satzformat wie
+  `ClientACL::save`, 136 Byte) und die Überwachungs-Konfig. Mit `secrets=1` zusätzlich WLAN-Passwort,
+  Admin-Passwort und Sensormeter-Passwörter unmaskiert.
+- ACL landet als offizielle CLI-Befehle `setperm <pubkey> <perm>` in `commands`. `get acl` funktioniert jetzt auch
+  in der Webkonsole (liest die Datei statt Serial).
+- Haken „Schlüssel und Passwörter einschließen“: prv.key, Admin-, Gast-, WLAN- und Sensormeter-Passwörter.
+  Ohne Haken sind auch `guest.password` und die Passwörter **nicht** enthalten (vorher war guest.password immer drin).
+  Dateiname dann mit `-VOLL`.
+- Einspielen: CLI-Befehle → Kanäle → Überwachung → zuletzt `POST /api/backup/apply` (Admin-Passwort per
+  `password`-Befehl und/oder WLAN+Hostname mit Neustart nach 3 s). Serverseitig in einem Rutsch, weil der Browser
+  nach der Passwortänderung keinen gültigen Login mehr hat. Beides sind Optionen beim Einspielen. Admin-Passwort
+  ist vorbelegt, WLAN nicht (Gerätetausch vs. gleiches Gerät). WLAN ist nur wählbar, wenn das Passwort im Backup ist
+  oder die SSID gleich bleibt (Server prüft das ebenfalls).
+- Nach dem Einspielen wird die Dateiauswahl zurückgesetzt. Gefunden im Test: Dieselbe Datei erneut zu wählen,
+  löste sonst kein `change` aus.
+- Nicht im Backup (bewusst): Nachbarn, Statistiken, Logs, Uhrzeit.
+- **Restgrenze:** MeshCore schreibt `/s_contacts` verzögert. Ein `setperm` unmittelbar vor dem Backup kann
+  fehlen.
+
+**Nebenbei:** Zwei `-Wmissing-field-initializers`-Warnungen aus M7 (`TemplateVars::host`) beseitigt. Der Build mit
+`-Wall -Wextra` zeigt wieder **0 Warnungen in `src/`**.
+
+**Verifikation:** Build V4 + R8 grün, Host-Tests grün, UI-Test **119/119** (neu: volles und reduziertes Backup,
+ACL, Restore mit Admin-Passwort + WLAN, WLAN-Sperre ohne Passwort, Log-Inhalt/Maskierung/Download/Löschen).
+Version 0.7.0, firmware.bin 1,33 MB (20 % des App-Slots). **Nicht HW-verifiziert.**

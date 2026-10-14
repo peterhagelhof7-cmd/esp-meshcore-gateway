@@ -14,6 +14,7 @@
 
 #include "ChannelStore.h"
 #include "CliBridge.h"
+#include "EventLog.h"
 #include "GatewayConfig.h"
 #include "LogBuffer.h"
 #include "MeshActions.h"
@@ -94,6 +95,28 @@ void setup() {
   FILESYSTEM* fs;
   SPIFFS.begin(true);
   fs = &SPIFFS;
+  // Dauerhaftes Ereignis-Log (E27): ausgewählte RAM-Logs zusätzlich auf SPIFFS.
+  event_log::begin();
+  console_log.setMirror([](char t, const char* s) {
+    // Befehl und Antwort kommen nacheinander aus dem loopTask. Antworten auf
+    // Geheimnis-Befehle (get prv.key, password ...) nie in die Datei.
+    static bool hideReply = false;
+    if (t == 'c') {
+      hideReply = cli_bridge::isSecretCommand(s);
+      event_log::add("CMD", cli_bridge::maskedCommand(s));
+    } else if (t == 'r') {
+      if (!hideReply) event_log::add("ANTW", s);
+    } else {
+      hideReply = false;
+      event_log::add("SYS", s);
+    }
+  });
+  alert_log.setMirror([](char t, const char* s) {
+    event_log::add(t == 'A' ? "MELD" : (t == 'X' ? "MELDX" : "UEBW"), s);
+  });
+  channel_log.setMirror([](char t, const char* s) {
+    if (t == 'S') event_log::add("KANAL", s);   // empfangene (M) nicht: zu viel Volumen
+  });
   IdentityStore store(SPIFFS, "/identity");
   if (!store.load("_main", the_mesh.self_id)) {
     MESH_DEBUG_PRINTLN("Generating new keypair");
@@ -175,11 +198,12 @@ void loop() {
     reply[0] = 0;
     // Serielle Befehle zusätzlich in der Webkonsole mitprotokollieren.
     uint32_t now = the_mesh.getRTCClock()->getCurrentTime();
-    console_log.push('c', now, command);
+    bool secret = cli_bridge::isSecretCommand(command);
+    console_log.push('c', now, secret ? cli_bridge::maskedCommand(command) : command);
     the_mesh.handleCommand(0, command, reply);  // NOTE: there is no sender_timestamp via serial!
     if (reply[0]) {
       Serial.print("  -> "); Serial.println(reply);
-      console_log.pushLines('r', now, reply);
+      console_log.pushLines('r', now, secret ? "(Antwort ausgeblendet)" : reply);
     }
 
     command[0] = 0;  // reset command buffer
@@ -198,6 +222,7 @@ void loop() {
     next_status_update = millis();   // geänderte Einstellungen sofort im Snapshot
   }
   network.loop();
+  event_log::loop();
   web_ui::loop();
   ota_update::loop();
   if (network.takeTimeSynced()) {

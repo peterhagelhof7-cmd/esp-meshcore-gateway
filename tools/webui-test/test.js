@@ -341,9 +341,24 @@ async function runCli(page, cmd) {
   check('Backup: Inhalt', bk.commands.includes('set tx 17') && bk.commands.includes('set radio 869.618,62.5,8,8') &&
         bk.commands.includes('region put rhein-main') && bk.commands.some(c => c.startsWith('set prv.key ')), bk.commands.length + ' Befehle');
   check('Backup: unsupported fem.txgain ausgelassen', !bk.commands.some(c => c.includes('fem.txgain')));
-  check('Backup: Sensormeter-Konfig enthalten (per Kanalname, ohne Passwort)', !!bk.sensormeter && bk.sensormeter.devices.length === 1 &&
-        bk.sensormeter.rules[0].channel === 'sensormeter' && bk.sensormeter.settings.defaultChannel === '#test' && bk.sensormeter.devices[0].pass === '',
-        JSON.stringify(bk.sensormeter && bk.sensormeter.rules));
+  check('Backup: Sensormeter-Konfig enthalten (per Kanalname, mit Passwort)', !!bk.sensormeter && bk.sensormeter.devices.length === 1 &&
+        bk.sensormeter.rules[0].channel === 'sensormeter' && bk.sensormeter.settings.defaultChannel === '#test' && bk.sensormeter.devices[0].pass === 'geheim',
+        JSON.stringify(bk.sensormeter && bk.sensormeter.devices));
+  check('Backup (voll): Admin-, Gast-, WLAN-Passwort', bk.version === 2 && bk.secrets === true && bk.adminPassword === 'password' &&
+        bk.commands.some(c => c.startsWith('set guest.password')) && bk.gw && bk.gw.wifi.ssid === 'TestNetz' && bk.gw.wifi.pass === 'geheim123' &&
+        bk.gw.hostname === 'meshcore-gw', JSON.stringify(bk.gw));
+  check('Backup: ACL als setperm', bk.commands.includes('setperm c0ffee' + '11'.repeat(29) + ' 3'), bk.commands.filter(c => c.startsWith('setperm')).join());
+  // Backup ohne Haken: keine Geheimnisse
+  fs.renameSync(path.join(dl, fs.readdirSync(dl).find(f => f.endsWith('.json'))), path.join(dl, 'voll.json.bak'));
+  await page.click('#bkKey');
+  await page.click('#bkDown');
+  check('Backup (ohne Geheimnisse): Datei', await waitFor(async () => fs.readdirSync(dl).some(f => f.endsWith('.json'))));
+  const bkLite = JSON.parse(fs.readFileSync(path.join(dl, fs.readdirSync(dl).find(f => f.endsWith('.json'))), 'utf8'));
+  check('Backup (ohne Geheimnisse): nichts Geheimes', bkLite.secrets === false && !('adminPassword' in bkLite) && !('pass' in bkLite.gw.wifi) &&
+        !bkLite.commands.some(c => c.startsWith('set prv.key') || c.startsWith('set guest.password')) && bkLite.sensormeter.devices[0].pass === '' &&
+        bkLite.commands.some(c => c.startsWith('setperm ')) && bkLite.gw.wifi.ssid === 'TestNetz', JSON.stringify(bkLite.gw));
+  fs.unlinkSync(path.join(dl, fs.readdirSync(dl).find(f => f.endsWith('.json'))));
+  fs.renameSync(path.join(dl, 'voll.json.bak'), bkFile);
   check('Backup: Ping-Ziele enthalten', !!bk.sensormeter && Array.isArray(bk.sensormeter.pings) && bk.sensormeter.pings.length === 2 &&
         bk.sensormeter.pings[1].host === '192.0.2.1' && bk.sensormeter.pings[1].thresholdS === 10 &&
         bk.sensormeter.pings[0].intervalS === 30 && bk.sensormeter.pings[1].intervalS === 10, JSON.stringify(bk.sensormeter && bk.sensormeter.pings));
@@ -356,10 +371,41 @@ async function runCli(page, cmd) {
   await input.uploadFile(bkFile);
   await waitFor(async () => !(await page.$eval('#bkRestore', e => e.disabled)));
   check('Restore: Schlüssel in Vorschau maskiert', (await text('#bkOut')).includes('set prv.key ••••••••') && !(await text('#bkOut')).includes('abab'));
+  check('Restore: Optionen Admin-Passwort + WLAN sichtbar', await page.$eval('#bkOpts', e => !e.hidden) &&
+        await page.$eval('#bkAdmL', e => !e.hidden) && await page.$eval('#bkWifiL', e => !e.hidden) && !(await page.$eval('#bkWifi', e => e.checked || e.disabled)));
+  check('Restore: Vorschau nennt ACL und WLAN', (await text('#bkOut')).includes('Zugriffsliste: 1 Einträge') && (await text('#bkOut')).includes('WLAN „TestNetz“ (mit Passwort)'), await text('#bkOut'));
+  await page.click('#bkAdm');   // erster Durchlauf ohne Passwort/WLAN
   await page.click('#bkRestore');
   check('Restore: eingespielt', await waitFor(async () => (await text('#bkMsg')) === 'Eingespielt', 15000), await text('#bkMsg'));
+  check('Restore: Auswahl danach zurückgesetzt', await page.$eval('#bkRestore', e => e.disabled) && (await page.$eval('#bkFile', e => e.value)) === '');
   check('Restore: tx wieder 17', await waitFor(async () => (await page.$eval('#f_tx', e => e.value)) === '17'));
   check('Restore: Region wieder da', await waitFor(async () => (await text('#regOut')).includes('de-by F')));
+  // Zweiter Durchlauf: Admin-Passwort + WLAN aus dem Backup zurückholen
+  await page.evaluate(() => fetch('/api/backup/apply', { method: 'POST', body: new URLSearchParams({ ssid: 'AnderesNetz', pass: 'x', hostname: 'anders' }) }));
+  await runCli(page, 'password temp1');
+  await page.$eval('#bkMsg', e => e.textContent = '');
+  await input.uploadFile(bkFile);
+  await waitFor(async () => (await text('#bkMsg')).includes('bereit'));
+  check('Restore: WLAN-Option trotz anderer SSID wählbar (Passwort im Backup)', !(await page.$eval('#bkWifi', e => e.disabled)));
+  await page.click('#bkWifi');
+  await page.click('#bkRestore');
+  check('Restore: Admin-Passwort + WLAN gemeldet', await waitFor(async () => (await text('#bkMsg')).includes('Admin-Passwort übernommen') && (await text('#bkMsg')).includes('WLAN übernommen'), 15000), await text('#bkMsg'));
+  const ex2 = await page.evaluate(async () => (await fetch('/api/backup/extra?secrets=1')).json());
+  check('Restore: WLAN/Hostname/Admin-Passwort wieder wie im Backup', await waitFor(async () => {
+    const e = await page.evaluate(async () => (await fetch('/api/backup/extra?secrets=1')).json());
+    return e.wifi.ssid === 'TestNetz' && e.wifi.pass === 'geheim123' && e.hostname === 'meshcore-gw' && e.adminPassword === 'password';
+  }), JSON.stringify(ex2));
+  // Backup ohne WLAN-Passwort und andere SSID -> Option gesperrt
+  await page.evaluate(() => fetch('/api/backup/apply', { method: 'POST', body: new URLSearchParams({ ssid: 'AnderesNetz', pass: 'x' }) }));
+  const lite = path.join(dl, 'lite.json');
+  fs.writeFileSync(lite, JSON.stringify(Object.assign({}, bkLite, { commands: ['set tx 17'] })));
+  await page.$eval('#bkMsg', e => e.textContent = '');
+  await input.uploadFile(lite);
+  await waitFor(async () => (await text('#bkMsg')).includes('bereit'));
+  check('Restore: WLAN ohne Passwort bei anderer SSID gesperrt', await page.$eval('#bkWifi', e => e.disabled) && await page.$eval('#bkAdmL', e => e.hidden));
+  await page.evaluate(() => fetch('/api/backup/apply', { method: 'POST', body: new URLSearchParams({ ssid: 'TestNetz', pass: 'geheim123' }) }));
+  const apiErr = await page.evaluate(async () => { const r = await fetch('/api/backup/apply', { method: 'POST', body: new URLSearchParams({ ssid: 'Fremd' }) }); return r.status + ' ' + (await r.json()).error; });
+  check('Restore-API: fremde SSID ohne Passwort abgelehnt', apiErr === '400 WLAN-Passwort fehlt im Backup', apiErr);
 
   // Passwort ändern -> in Konsole maskiert
   await page.type('#admPass', 'geheim123');
@@ -424,6 +470,24 @@ async function runCli(page, cmd) {
     m = await upload(binV4, false);
     check('OTA: echte V4-Firmware (gleiche Version) angenommen', /Installiert \(\d+\.\d+\.\d+\)/.test(m), m);
     await page.screenshot({ path: out + '/09_system_ota.png', fullPage: true });
+
+    // ---------- Ereignis-Log (E27) ----------
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.click('nav a[data-v=wifi]');
+    check('Log: Größe angezeigt', await until(async () => / KB von 128 KB$/.test(await t('#lg_size'))), await t('#lg_size'));
+    check('Log: Download-Link', (await page.$eval('#lgDown', e => e.getAttribute('href'))) === '/api/log/download');
+    const lg = await page.evaluate(async () => { const r = await fetch('/api/log/download'); return { cd: r.headers.get('Content-Disposition'), body: await r.text() }; });
+    check('Log: als Datei mit Hostname', lg.cd === 'attachment; filename="meshcore-gw-log-meshcore-gw.txt"', lg.cd);
+    check('Log: enthält Befehle, Ping-Alarm, Systemmeldung', /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d CMD   set tx 5$/m.test(lg.body) &&
+          /MELD  #test -> PING-ALARM Testziel/.test(lg.body) && / SYS   Gateway gestartet/.test(lg.body), lg.body.slice(0, 300));
+    check('Log: Passwörter/Schlüssel nie im Klartext', !lg.body.includes('temp1') && !lg.body.includes('geheim123') && !/abababab/.test(lg.body) &&
+          lg.body.includes('CMD   password ********') && lg.body.includes('CMD   set prv.key ********') && lg.body.includes('CMD   set guest.password ********'),
+          lg.body.split('\n').filter(l => /password|prv\.key/.test(l)).join(' / '));
+    await page.click('#lgClear');
+    check('Log: gelöscht', await until(async () => (await t('#lgMsg')) === 'Gelöscht'));
+    const lg2 = await page.evaluate(async () => (await fetch('/api/log/download')).text());
+    check('Log: nach Löschen nur Löschvermerk', lg2.trim().split('\n').length === 1 && lg2.includes('LOG   Log gelöscht'), lg2);
+    await page.screenshot({ path: out + '/12_system_log.png', fullPage: true });
   }
 
   check('Keine JS-Fehler', errors.length === 0, errors.join(' | '));

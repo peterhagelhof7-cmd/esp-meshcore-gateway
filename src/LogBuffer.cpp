@@ -28,6 +28,7 @@ void LogBuffer::push(char type, uint32_t epoch, const char* text) {
   l.type = type;
   strlcpy(l.text, text ? text : "", sizeof(l.text));
   xSemaphoreGive(_lock);
+  if (_mirror) _mirror(type, text ? text : "");
 }
 
 void LogBuffer::pushLines(char type, uint32_t epoch, const char* text) {

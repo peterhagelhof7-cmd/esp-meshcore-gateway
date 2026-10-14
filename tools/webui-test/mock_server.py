@@ -42,6 +42,34 @@ def push(name, t, x):
         seq[name] += 1
         if len(logs[name]) > CAP[name]:
             logs[name].pop(0)
+        evmirror(name, t, x)
+
+
+# Ereignis-Log wie EventLog.cpp + Mirrors aus main.cpp (E27)
+EV_SECRET = ('password ', 'set prv.key', 'get prv.key', 'set guest.password', 'get guest.password',
+             'set bridge.secret', 'get bridge.secret')
+evlog = {'text': '', 'hide': False}
+
+
+def evadd(tag, text):
+    evlog['text'] += time.strftime('%Y-%m-%d %H:%M:%S') + ' %-5s ' % tag + text.replace('\n', ' | ') + '\n'
+
+
+def evmirror(name, t, x):
+    if name == 'console':
+        if t == 'c':
+            evlog['hide'] = x.startswith(EV_SECRET)
+            if x.startswith('set ') and evlog['hide']:
+                x = ' '.join(x.split(' ')[:2]) + ' ********'
+            evadd('CMD', x)
+        elif t == 'r':
+            if not evlog['hide']: evadd('ANTW', x)
+        else:
+            evlog['hide'] = False; evadd('SYS', x)
+    elif name == 'smlog':
+        evadd({'A': 'MELD', 'X': 'MELDX'}.get(t, 'UEBW'), x)
+    elif name == 'messages' and t == 'S':
+        evadd('KANAL', x)
 
 
 def ftoa(f):
@@ -63,6 +91,7 @@ class FakeCli:
                   'password': 'password'}
         self.regions = []   # [name, parent, flood, home]
         self.key = 'ab' * 64
+        self.acl = {'c0ffee' + '11' * 29: 3}   # ein Admin-Client
 
     def region_tree(self):
         out = ['* F']
@@ -155,6 +184,15 @@ class FakeCli:
         if cmd.startswith('password '):
             self.p['password'] = cmd[9:][:15]
             return 'password now: ' + self.p['password']
+        if cmd.startswith('setperm '):
+            parts = cmd.split(' ')
+            if len(parts) != 3 or not re.fullmatch(r'[0-9a-fA-F]{64}', parts[1]): return 'Err - bad params'
+            perm = int(parts[2])
+            if perm & 3 == 0: self.acl.pop(parts[1].lower(), None)   # Gast wird nicht gespeichert
+            else: self.acl[parts[1].lower()] = perm
+            return 'OK'
+        if cmd == 'get acl':
+            return 'ACL: %d Eintrag/Einträge' % len(self.acl) + ''.join('\n%02X %s' % (v, k) for k, v in self.acl.items())
         if cmd == 'region': return self.region_tree()
         parts = cmd.split(' ')
         if parts[0] == 'region' and len(parts) >= 2:
@@ -518,6 +556,9 @@ for i in range(5):
     push('packets', 'T', f'len=40 ADVERT(4) route=F hops={i+1} payload=30')
 
 
+gwcfg = {'ssid': 'TestNetz', 'pass': 'geheim123', 'hostname': 'meshcore-gw', 'reboots': 0}
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
@@ -542,7 +583,28 @@ class H(BaseHTTPRequestHandler):
               'stats_core': {'battery_mv': 0, 'uptime_secs': 3725, 'errors': 0, 'queue_len': 0},
               'stats_radio': {'noise_floor': -112, 'last_rssi': -90, 'last_snr': 7.5, 'tx_air_secs': 3, 'rx_air_secs': 12},
               'stats_packets': {'recv': 10, 'sent': 5, 'flood_tx': 5, 'direct_tx': 0, 'flood_rx': 10, 'direct_rx': 0, 'recv_errors': 0},
-              'wifi': {'mode': 'station', 'ssid': 'TestNetz', 'ip': '192.168.1.50', 'rssi': -55, 'mac': 'AA:BB:CC:DD:EE:FF', 'hostname': 'meshcore-gw'}})
+              'wifi': {'mode': 'station', 'ssid': gwcfg['ssid'], 'ip': '192.168.1.50', 'rssi': -55, 'mac': 'AA:BB:CC:DD:EE:FF', 'hostname': gwcfg['hostname']}})
+        if u.path == '/api/backup/extra':
+            secrets = q.get('secrets', ['0'])[0] == '1'
+            with lock:
+                sm = json.loads(json.dumps(smm.cfg)) if secrets else smm.json()['config']
+                out = {'hostname': gwcfg['hostname'], 'wifi': {'ssid': gwcfg['ssid']},
+                       'acl': [{'perm': v, 'pubkey': k} for k, v in cli.acl.items()], 'sensormeter': sm}
+                if secrets:
+                    out['wifi']['pass'] = gwcfg['pass']; out['adminPassword'] = cli.p['password']
+            return self.send_json(out)
+        if u.path == '/api/log/info':
+            with lock:
+                n = len(evlog['text'].encode())
+            return self.send_json({'fileBytes': n, 'pendingBytes': 0, 'maxBytes': 131072, 'lastFlushAgoS': 5,
+                                   'flushIntervalS': 900, 'flushes': 1, 'dropped': 0})
+        if u.path == '/api/log/download':
+            with lock:
+                b = evlog['text'].encode()
+            self.send_response(200); self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            if 'inline' not in q:
+                self.send_header('Content-Disposition', 'attachment; filename="meshcore-gw-log-%s.txt"' % gwcfg['hostname'])
+            self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b); return
         if u.path in ('/api/console', '/api/packets', '/api/messages', '/api/sm/log'):
             name = 'smlog' if u.path == '/api/sm/log' else u.path.split('/')[-1]
             since = int(q.get('since', ['0'])[0])
@@ -632,6 +694,25 @@ class H(BaseHTTPRequestHandler):
             return self.send_json({'ok': True})
         if u.path == '/api/reboot':
             return self.send_json({'ok': True})
+        if u.path == '/api/log/clear':
+            with lock:
+                evlog['text'] = ''; evadd('LOG', 'Log gelöscht')
+            return self.send_json({'ok': True})
+        if u.path == '/api/backup/apply':
+            f = lambda k: form.get(k, [''])[0]
+            pw = f('adminPassword')
+            if pw and (len(pw) > 15 or ' ' in pw):
+                return self.send_json({'error': 'Admin-Passwort: 1-15 Zeichen, keine Leerzeichen'}, 400)
+            with lock:
+                if 'ssid' in form:
+                    if 'pass' not in form and f('ssid') != gwcfg['ssid']:
+                        return self.send_json({'error': 'WLAN-Passwort fehlt im Backup'}, 400)
+                    gwcfg['ssid'] = f('ssid')
+                    if 'pass' in form: gwcfg['pass'] = f('pass')
+                    if f('hostname'): gwcfg['hostname'] = f('hostname')
+                    gwcfg['reboots'] += 1
+            if pw: submit(['password ' + pw], False)
+            return self.send_json({'ok': True, 'reboot': 'ssid' in form})
         self.send_response(404); self.end_headers()
 
 
