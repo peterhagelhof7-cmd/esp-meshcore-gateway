@@ -46,6 +46,15 @@ void LogBuffer::pushLines(char type, uint32_t epoch, const char* text) {
   } while (*p);
 }
 
+bool LogBuffer::latest(Line& out) {
+  if (!_lines) return false;
+  xSemaphoreTake(_lock, portMAX_DELAY);
+  bool ok = _nextSeq > 1;
+  if (ok) out = _lines[(_nextSeq - 1) % _cap];
+  xSemaphoreGive(_lock);
+  return ok;
+}
+
 static void appendEscaped(String& out, const char* s) {
   for (; *s; s++) {
     char c = *s;

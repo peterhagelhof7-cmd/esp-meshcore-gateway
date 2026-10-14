@@ -46,6 +46,7 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 - [x] Andere Board-Datei (R8 auf V4) → abgelehnt; Textdatei → abgelehnt
 - [x] Rollback-Test (optional): Testbuild, der nach 10 s absichtlich abstürzt → Gerät kommt mit alter Version zurück
 - [ ] OLED-Taste: kurz und lang → nur Seitenwechsel, **kein** Abschalten
+- [ ] OLED Seite 4/4 „Nachricht“: Nachricht in `#test` aus der App → Kanal, Uhrzeit, Text mit Umlauten; Alarm-Test → „gesendet“
 
 ## 7. Sensormeter (M6)
 - [ ] Privaten Kanal „sensormeter“ anlegen (Scope rhein-main ist vorbelegt), als Standardkanal setzen
