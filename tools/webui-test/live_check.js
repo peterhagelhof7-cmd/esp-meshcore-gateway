@@ -18,6 +18,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const text = sel => page.$eval(sel, e => e.textContent);
   const waitFor = async (fn, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await sleep(250); } return false; };
 
+  // Nachbarn (E34): Tabelle im Status-Tab, nur lesen (klickt nicht „Jetzt suchen“)
+  const nb = async () => page.$$eval('#nbBody tr', r => r.map(t => [...t.children].map(c => c.textContent)));
+  check('Status: Nachbarn-Tabelle', await waitFor(async () => { const r = await nb(); return r.length > 0 && r[0][0] !== '–' &&
+    r.every(x => (x.length === 3 && /^[0-9A-F]{8}$/.test(x[0]) && /^vor /.test(x[1]) && / dB$/.test(x[2])) || x[0] === 'noch keine'); }), JSON.stringify(await nb()));
+
   await page.click('nav a[data-v=settings]');
   check('Profil: alles wie empfohlen', await waitFor(async () => (await text('#profMsg')) === 'Alles wie empfohlen'), await text('#profMsg'));
   await waitFor(async () => (await page.$eval('#f_txdelay', e => e.value)) !== '');
