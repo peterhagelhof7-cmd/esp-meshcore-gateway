@@ -546,3 +546,21 @@ vorne, Base64 klein darunter.
 **Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün, UI-Test 123/123 (neu: interne
 Zeile, Status, Regel → ALARM-Text, Umnummerierung, Hex-Schlüssel). Am Gerät per OTA: Live-Check 9/9,
 Chiptemperatur 51,7 °C, Log-Zeile, Schlüssel `sps-alarm` = Hex aus der App.
+
+## E31 – OLED-Seite 4 „Nachricht“ (2026-10-14, User: „bau nur die Display-Seite“), 0.7.3
+
+- Vorgeschlagen war zusätzlich ein „Kanal-Lauscher“, der #-Kanäle per Namensliste und Prüfsumme erkennt
+  (Pakete tragen nur 1 Byte Kanal-Hash, der Name ist nicht rückrechenbar). Der User hat sich **nur für die
+  Display-Seite** entschieden, der Lauscher wird nicht gebaut.
+- Seite 4 zeigt die neueste Zeile des Nachrichten-Logs (`channel_log`, empfangen **oder** gesendet, damit
+  auch Alarme des Gateways): Kanalname links, Uhrzeit rechts (ohne gültige Uhrzeit das Alter „-5m“/„-2h“),
+  darunter bis zu 4 Zeilen Text mit Wortumbruch (21 Zeichen, hart getrennt nur Wörter länger als eine Zeile,
+  Rest „...“), Fußzeile „SNR x hop“ bzw. „gesendet“.
+- Neu `LogBuffer::latest()`. Kein eigener Speicher, kein Aufwecken der Anzeige bei neuer Nachricht.
+- Umlaute: Der SSD1306-Treiber nutzt Code Page 437. UTF-8 wird für ä ö ü Ä Ö Ü ß ° é umgesetzt, alles
+  andere (Emojis) wird „?“. Upstreams `translateUTF8ToBlocks` hätte Umlaute als Blöcke gezeigt.
+
+**Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün. Die Seite selbst per
+PC-Test mit dem echten Code (21×6-Zeichenraster statt OLED): leer, empfangen mit Umlauten, gesendeter
+Alarm ohne Uhrzeit, Überlänge mit Emoji und Langwort. Dabei gefunden und behoben: Umbruch trennte mitten im
+Wort, wenn das letzte Leerzeichen in der ersten Zeilenhälfte lag. Auf dem Gerät noch nicht gesehen.

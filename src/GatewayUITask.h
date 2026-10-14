@@ -9,10 +9,12 @@ class NodePrefs;
 // OLED-Anzeige des Gateways (M5, docs/entscheidungen.md E20), ersetzt
 // examples/simple_repeater/UITask:
 //   - Startbild wie Upstream (Logo, Version)
-//   - 3 Seiten, Taste kurz drücken = Anzeige an bzw. nächste Seite:
+//   - 4 Seiten, Taste kurz drücken = Anzeige an bzw. nächste Seite:
 //       1 Netz:  Name, WLAN-Modus, IP (im Installer-AP: SSID + Passwort)
 //       2 Funk:  Frequenz/SF/BW/CR, TX, Rauschpegel
 //       3 Mesh:  Pakete RX/TX, Uhrzeit (NTP) bzw. Laufzeit
+//       4 Nachricht: neueste Kanalnachricht (empfangen oder gesendet, also
+//                auch Alarme), Kanal + Uhrzeit, Text umgebrochen, SNR/Hops (E31)
 //   - Auto-Aus nach 60 s gegen Einbrennen, im Installer-AP bleibt sie an
 //   - KEIN Abschalten per langem Tastendruck (Upstream: powerOff/Deep-Sleep;
 //     ohne Akku wäre das Gateway dann nur per Stromtrennung zurückzuholen)
@@ -28,6 +30,8 @@ private:
   void renderNet();
   void renderRadio();
   void renderMesh();
+  void renderMessage();
+  void footer(int page);
 
   mesh::MainBoard* _board;
   DisplayDriver* _display;

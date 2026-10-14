@@ -6,10 +6,11 @@
 #include "target.h"
 #include "GatewayStatus.h"
 #include "NetworkManager.h"
+#include "LogBuffer.h"
 
 #define AUTO_OFF_MILLIS     60000   // Upstream: 20 s
 #define BOOT_SCREEN_MILLIS  4000
-#define PAGES               3
+#define PAGES               4
 
 // 'meshcore', 128x13px - Logo aus examples/simple_repeater/UITask.cpp (MIT)
 static const uint8_t meshcore_logo[] PROGMEM = {
@@ -36,6 +37,51 @@ static bool jsonNumber(const char* json, const char* key, long& out) {
   if (!p) return false;
   out = strtol(p + strlen(pat), nullptr, 10);
   return true;
+}
+
+// UTF-8 -> Code Page 437 (der SSD1306-Treiber schaltet cp437 ein). Deutsche
+// Umlaute, ß, ° und é gibt es dort, alles andere (Emojis ...) wird '?'.
+static void toCp437(char* dst, size_t size, const char* src) {
+  size_t j = 0;
+  const unsigned char* s = (const unsigned char*)src;
+  while (*s && j + 1 < size) {
+    unsigned char c = *s;
+    if (c < 0x80) {
+      dst[j++] = (c < 0x20) ? ' ' : (char)c;
+      s++;
+      continue;
+    }
+    uint32_t cp = 0;
+    int extra = 0;
+    if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; extra = 1; }
+    else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; extra = 2; }
+    else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; extra = 3; }
+    s++;
+    for (int k = 0; k < extra && (*s & 0xC0) == 0x80; k++, s++) cp = (cp << 6) | (*s & 0x3F);
+    while ((*s & 0xC0) == 0x80) s++;   // kaputte Folge überspringen
+    char o;
+    switch (cp) {
+      case 0xE4: o = '\x84'; break;   // ä
+      case 0xF6: o = '\x94'; break;   // ö
+      case 0xFC: o = '\x81'; break;   // ü
+      case 0xC4: o = '\x8E'; break;   // Ä
+      case 0xD6: o = '\x99'; break;   // Ö
+      case 0xDC: o = '\x9A'; break;   // Ü
+      case 0xDF: o = '\xE1'; break;   // ß
+      case 0xB0: o = '\xF8'; break;   // °
+      case 0xE9: o = '\x82'; break;   // é
+      default:   o = '?'; break;
+    }
+    dst[j++] = o;
+  }
+  dst[j] = 0;
+}
+
+void GatewayUITask::footer(int page) {
+  char tmp[8];
+  snprintf(tmp, sizeof(tmp), "%d/%d", page, PAGES);
+  _display->setCursor(0, 54);
+  _display->print(tmp);
 }
 
 void GatewayUITask::begin(NodePrefs* prefs, const char* buildDate, const char* firmwareVersion) {
@@ -86,8 +132,7 @@ void GatewayUITask::renderNet() {
     _display->setCursor(0, 26);
     _display->print(network.ssid().c_str());
   }
-  _display->setCursor(0, 54);
-  _display->print("1/3");
+  footer(1);
 }
 
 void GatewayUITask::renderRadio() {
@@ -107,8 +152,7 @@ void GatewayUITask::renderRadio() {
     snprintf(tmp, sizeof(tmp), "Rauschen %ld dBm", nf);
     _display->print(tmp);
   }
-  _display->setCursor(0, 54);
-  _display->print("2/3");
+  footer(2);
 }
 
 void GatewayUITask::renderMesh() {
@@ -135,8 +179,86 @@ void GatewayUITask::renderMesh() {
     snprintf(tmp, sizeof(tmp), "Laufzeit %luh %02lum", up / 3600, (up / 60) % 60);
   }
   _display->print(tmp);
-  _display->setCursor(0, 54);
-  _display->print("3/3");
+  footer(3);
+}
+
+// Seite 4: neueste Zeile des Nachrichten-Logs (empfangen oder gesendet, also
+// auch Alarme des Gateways). Format der Zeile siehe GatewayMesh:
+// "idx \t Kanal \t SNR \t Hops \t Text", SNR leer = gesendet.
+void GatewayUITask::renderMessage() {
+  static const int COLS = 21;   // 128 px / 6 px Standardschrift
+  static const int ROWS = 4;
+  LogBuffer::Line l;
+  _display->setCursor(0, 0);
+  if (!channel_log.latest(l)) {
+    _display->print("Nachricht");
+    _display->setCursor(0, 22);
+    _display->print("noch keine");
+    footer(4);
+    return;
+  }
+
+  const char* f[5] = {"", "", "", "", ""};
+  char* p = l.text;
+  for (int i = 0; i < 5; i++) {
+    f[i] = p;
+    char* t = (i < 4) ? strchr(p, '\t') : nullptr;
+    if (!t) break;
+    *t = 0;
+    p = t + 1;
+  }
+  bool sent = (l.type == 'S');
+
+  // Kopf: Kanal links, Uhrzeit bzw. Alter rechts
+  char head[24], when[12], tmp[48];
+  toCp437(head, sizeof(head), f[1]);
+  time_t ep = l.epoch;
+  if (ep > 1700000000) {
+    struct tm lt;
+    localtime_r(&ep, &lt);
+    strftime(when, sizeof(when), "%H:%M", &lt);
+  } else {
+    unsigned long age = (millis() - l.uptimeMs) / 60000;
+    if (age < 60) snprintf(when, sizeof(when), "-%lum", age);
+    else snprintf(when, sizeof(when), "-%luh", age / 60);
+  }
+  int maxHead = COLS - 1 - (int)strlen(when);
+  if ((int)strlen(head) > maxHead) head[maxHead] = 0;
+  _display->print(head);
+  _display->drawTextRightAlign(_display->width(), 0, when);
+
+  // Text mit Wortumbruch, Zeichen bei COLS fest (Schrift ist nicht proportional)
+  char body[LogBuffer::LINE_LEN];
+  toCp437(body, sizeof(body), f[4]);
+  const char* b = body;
+  for (int row = 0; row < ROWS && *b; row++) {
+    while (*b == ' ') b++;
+    int n = strlen(b);
+    if (n > COLS) {
+      n = COLS;
+      if (row < ROWS - 1) {
+        int sp = COLS;
+        while (sp > 0 && b[sp] != ' ') sp--;
+        if (sp > 0) n = sp;   // hart trennen nur Wörter > 1 Zeile
+      } else {
+        n = COLS - 3;
+      }
+    }
+    memcpy(tmp, b, n);
+    tmp[n] = 0;
+    if (row == ROWS - 1 && (int)strlen(b) > COLS) strcat(tmp, "...");
+    _display->setCursor(0, 12 + row * 10);
+    _display->print(tmp);
+    b += n;
+  }
+
+  footer(4);
+  if (sent) {
+    strcpy(tmp, "gesendet");
+  } else {
+    snprintf(tmp, sizeof(tmp), "SNR %s %s hop", f[2], f[3]);
+  }
+  _display->drawTextRightAlign(_display->width(), 54, tmp);
 }
 
 void GatewayUITask::render() {
@@ -149,6 +271,7 @@ void GatewayUITask::render() {
   switch (_page) {
     case 1: renderRadio(); break;
     case 2: renderMesh(); break;
+    case 3: renderMessage(); break;
     default: renderNet(); break;
   }
 }

@@ -37,6 +37,9 @@ public:
   // vorhandenen Zeile schon überschrieben wurden.
   uint32_t appendJson(uint32_t since, size_t maxLines, String& out, bool& gap);
 
+  // Kopie der neuesten Zeile, false = noch keine (OLED-Seite "Nachricht").
+  bool latest(Line& out);
+
 private:
   size_t _cap;
   Line* _lines = nullptr;
