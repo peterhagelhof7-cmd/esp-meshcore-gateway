@@ -118,7 +118,14 @@ static const char* resetReason() {
     case ESP_RST_DEEPSLEEP: return "Deep-Sleep";
     case ESP_RST_BROWNOUT: return "Unterspannung (Brownout)";
     case ESP_RST_SDIO: return "SDIO";
-    default: return "unbekannt";
+    // Das IDF dieses Frameworks kennt ESP_RST_USB/JTAG noch nicht. Ein Reset per
+    // USB-Serial/JTAG (z. B. nach dem Flashen) landet hier.
+    case ESP_RST_UNKNOWN: return "unbekannt (z. B. USB-Reset nach dem Flashen)";
+    default: {
+      static char buf[24];
+      snprintf(buf, sizeof(buf), "Code %d", (int)esp_reset_reason());
+      return buf;
+    }
   }
 }
 

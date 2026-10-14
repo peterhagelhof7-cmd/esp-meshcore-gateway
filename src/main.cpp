@@ -96,6 +96,8 @@ void setup() {
   SPIFFS.begin(true);
   fs = &SPIFFS;
   // Dauerhaftes Ereignis-Log (E27): ausgewählte RAM-Logs zusätzlich auf SPIFFS.
+  setenv("TZ", NetworkManager::TZ_RULE, 1);
+  tzset();
   event_log::begin();
   console_log.setMirror([](char t, const char* s) {
     // Befehl und Antwort kommen nacheinander aus dem loopTask. Antworten auf

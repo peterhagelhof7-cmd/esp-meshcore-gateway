@@ -147,7 +147,7 @@ void NetworkManager::loop() {
       // betrifft nur localtime() fürs OLED. SNTP synchronisiert danach selbst
       // weiter (Standard 1 h), jede Synchronisation meldet onTimeSync.
       sntp_set_time_sync_notification_cb(onTimeSync);
-      configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org", "time.cloudflare.com");
+      configTzTime(TZ_RULE, "pool.ntp.org", "time.cloudflare.com");
       _sntpStarted = true;
       Serial.println("[NET] NTP gestartet");
     }

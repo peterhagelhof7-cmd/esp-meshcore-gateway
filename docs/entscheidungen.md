@@ -488,3 +488,39 @@ Upstream gibt die ACL nur seriell aus (`get acl` → `Serial.printf`), das Admin
 **Verifikation:** Build V4 + R8 grün, Host-Tests grün, UI-Test **119/119** (neu: volles und reduziertes Backup,
 ACL, Restore mit Admin-Passwort + WLAN, WLAN-Sperre ohne Passwort, Log-Inhalt/Maskierung/Download/Löschen).
 Version 0.7.0, firmware.bin 1,33 MB (20 % des App-Slots). **Nicht HW-verifiziert.**
+
+## E29 – Erster Hardware-Test: sechs Fehler gefunden und behoben (2026-10-14, 0.7.1)
+
+Platine: Standard-Heltec-V4 (ESP32-S3 rev v0.2, 2 MB QSPI-PSRAM, 16 MB Flash), `gateway_heltec_v4`.
+Erstes Flashen per USB (erase + upload), danach alle Updates per OTA über die Web-API.
+
+Gefunden am echten Gerät (Mock und Host-Tests konnten das nicht zeigen):
+
+1. **Rollback-Schutz wirkungslos.** `verifyRollbackLater()` war C++ ohne `extern "C"`. Der Arduino-Core
+   deklariert die schwache Funktion in C, unsere Definition bekam ein anderes Symbol, der Core bestätigte jede
+   neue Firmware sofort (Status „gültig“ nach 8 s). Fix: `extern "C"`. Danach am Gerät: „Prüflauf“ → nach 62 s
+   „gültig“. Echter Rollback-Test mit einem Build, der nach 20 s `abort()` ruft: Bootloader startet wieder die
+   vorherige Partition. Neue Log-Zeile „ROLLBACK: neue Firmware auf appX ist im Prüflauf abgestürzt“.
+2. **`/api/sm` und `/api/backup/extra` lieferten kaputtes JSON.** ArduinoJson 7 ersetzt mit
+   `serializeJson(doc, String&)` den Inhalt, statt anzuhängen. Damit fehlten `{"config":` bzw. Hostname, WLAN
+   und ACL. Folge: Überwachungs-Tab und Backup-Download wären auf HW kaputt gewesen. Fix: erst in ein eigenes
+   String serialisieren, dann anhängen.
+3. **„Änderungen speichern“ blockiert.** MeshCore gibt float32 ungerundet aus (`txdelay` 0.6999999, Frequenz
+   869.6179809). In ein Zahlenfeld mit `step=0.1` geschrieben, verweigert der Browser das Absenden. Fix: beim
+   Laden auf 4 Nachkommastellen runden (nicht lat/lon). Das Backup schreibt jetzt `set radio 869.618,…`.
+4. **Profilvergleich zeigte die Frequenz als Abweichung** (feste Toleranz 1e-6). Fix: relative Toleranz 1e-6.
+5. **Log-Zeiten nach Neustart in UTC.** Die Uhr überlebt einen Software-Neustart, die Zeitzone wurde aber erst
+   mit NTP gesetzt. Fix: TZ schon in `setup()`.
+6. **Neustart über Weboberfläche und WLAN-Speichern standen nicht im Ereignis-Log.** Ergänzt. Dazu die
+   Kopfzeile von `get acl` im Log. Startgrund `ESP_RST_UNKNOWN` (z. B. USB-Reset nach dem Flashen) heißt
+   jetzt so, andere Codes werden als Zahl ausgegeben. Das IDF des Frameworks kennt `ESP_RST_USB` noch nicht.
+
+Mock angepasst: `get radio`/`txdelay` liefern float32-Werte wie die HW. Gegenprobe: Der UI-Test schlägt mit
+dem alten `index_html.h` fehl. Neu: `tools/webui-test/live_check.js`, eine Nur-Lese-Prüfung der Oberfläche
+gegen ein echtes Gerät.
+
+Am Gerät bestätigt: Profil (22 Werte) wie empfohlen, Login (altes Passwort 401), OTA-Ablehnung (Textdatei,
+R8-Image), OTA gleiche Version, Partitionswechsel, Shutdown-Flush des Logs, Repeater leitet Pakete weiter
+(Grundrauschen −109 dBm, Nachbar RSSI −71…−76 dBm).
+
+**Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün, UI-Test 119/119, Live-Check 6/6.

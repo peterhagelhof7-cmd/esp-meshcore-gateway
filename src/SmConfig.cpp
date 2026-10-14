@@ -187,7 +187,11 @@ static void serialize(const Config& c, String& out, bool maskPass) {
     p["thresholdS"] = x.thresholdS;
     p["intervalS"] = x.intervalS;
   }
-  serializeJson(doc, out);
+  // ArduinoJson 7 ersetzt den Inhalt eines String-Ziels statt anzuhängen -> erst in ein
+  // eigenes String, sonst gehen die Teile davor verloren ({"config": in /api/sm, Backup).
+  String tmp;
+  serializeJson(doc, tmp);
+  out += tmp;
 }
 
 void begin() {
