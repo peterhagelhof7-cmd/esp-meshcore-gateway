@@ -23,8 +23,15 @@ public:
   IPAddress ip() const;
   String ssid() const;
   int rssi() const;
-  String hostname() const { return _hostname; }
+  String hostname() const;   // aktuell verwendeter (thread-sicher)
+  bool hostnameAuto() const;
 
+  // Quelle des Gerätenamens (MeshCore node_name) für den automatischen
+  // Hostnamen (E32). Vor begin() setzen, Aufruf nur im loopTask.
+  void setNameSource(const char* (*fn)()) { _nameSource = fn; }
+
+  static constexpr const char* FALLBACK_HOSTNAME = "meshcore-gw";
+  // a-z, 0-9, '-', max. 31 Zeichen (Puffer im WLAN-Treiber), leer -> FALLBACK
   static String sanitizeHostname(const String& name);
   // Mitteleuropa mit Sommerzeit. Wird schon in setup() gesetzt: die Systemzeit
   // überlebt einen Software-Neustart, sonst stehen die ersten Log-Zeilen in UTC.
@@ -36,9 +43,16 @@ public:
 
 private:
   void startInstallerAp();
+  String wantedHostname() const;
+  void followDeviceName(unsigned long now);
   static void onEvent(WiFiEvent_t event);
 
-  String _hostname;
+  void setHostnameNow(const String& h);
+  char _hostname[32] = {0};
+  mutable portMUX_TYPE _hostMux = portMUX_INITIALIZER_UNLOCKED;
+  const char* (*_nameSource)() = nullptr;
+  unsigned long _hostCheckMs = 0;
+  unsigned long _hostChangedMs = 0;   // 0 = keine Änderung anstehend
   unsigned long _checkStartedMs = 0;
   unsigned long _checkTimeoutMs = 0;
   unsigned long _lastReconnectMs = 0;

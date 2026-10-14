@@ -153,6 +153,7 @@ void setup() {
   gateway_status::begin();
   gateway_status::update();      // erster Snapshot, bevor der Webserver Anfragen annimmt
   gw_config.begin();
+  network.setNameSource([]() -> const char* { return the_mesh.getNodePrefs()->node_name; });
   network.begin();
   web_ui::begin();
   ota_update::begin();

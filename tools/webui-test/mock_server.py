@@ -577,7 +577,33 @@ for i in range(5):
     push('packets', 'T', f'len=40 ADVERT(4) route=F hops={i+1} payload=30')
 
 
-gwcfg = {'ssid': 'TestNetz', 'pass': 'geheim123', 'hostname': 'meshcore-gw', 'reboots': 0}
+# hostname '' = automatisch, folgt dem Gerätenamen (E32)
+gwcfg = {'ssid': 'TestNetz', 'pass': 'geheim123', 'hostname': '', 'reboots': 0}
+
+
+def sanitize_host(name):
+    # wie NetworkManager::sanitizeHostname
+    out = ''
+    for c in name.lower():
+        if c.isascii() and (c.isalnum() or c == '-'):
+            out += c
+        elif c in ' _' and out and out[-1] != '-':
+            out += '-'
+    out = out.lstrip('-')[:31].rstrip('-')
+    return out or 'meshcore-gw'
+
+
+def host_setting(inp):
+    # wie GatewayConfig::hostSetting
+    inp = inp.strip()
+    if not inp:
+        return ''
+    h = sanitize_host(inp)
+    return '' if h == 'meshcore-gw' else h
+
+
+def eff_host():
+    return gwcfg['hostname'] or sanitize_host(cli.p['name'])
 
 
 class H(BaseHTTPRequestHandler):
@@ -604,7 +630,7 @@ class H(BaseHTTPRequestHandler):
               'stats_core': {'battery_mv': 0, 'uptime_secs': 3725, 'errors': 0, 'queue_len': 0},
               'stats_radio': {'noise_floor': -112, 'last_rssi': -90, 'last_snr': 7.5, 'tx_air_secs': 3, 'rx_air_secs': 12},
               'stats_packets': {'recv': 10, 'sent': 5, 'flood_tx': 5, 'direct_tx': 0, 'flood_rx': 10, 'direct_rx': 0, 'recv_errors': 0},
-              'wifi': {'mode': 'station', 'ssid': gwcfg['ssid'], 'ip': '192.168.1.50', 'rssi': -55, 'mac': 'AA:BB:CC:DD:EE:FF', 'hostname': gwcfg['hostname']}})
+              'wifi': {'mode': 'station', 'ssid': gwcfg['ssid'], 'ip': '192.168.1.50', 'rssi': -55, 'mac': 'AA:BB:CC:DD:EE:FF', 'hostname': eff_host(), 'hostname_auto': not gwcfg['hostname']}})
         if u.path == '/api/backup/extra':
             secrets = q.get('secrets', ['0'])[0] == '1'
             with lock:
@@ -624,7 +650,7 @@ class H(BaseHTTPRequestHandler):
                 b = evlog['text'].encode()
             self.send_response(200); self.send_header('Content-Type', 'text/plain; charset=utf-8')
             if 'inline' not in q:
-                self.send_header('Content-Disposition', 'attachment; filename="meshcore-gw-log-%s.txt"' % gwcfg['hostname'])
+                self.send_header('Content-Disposition', 'attachment; filename="meshcore-gw-log-%s.txt"' % eff_host())
             self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b); return
         if u.path in ('/api/console', '/api/packets', '/api/messages', '/api/sm/log'):
             name = 'smlog' if u.path == '/api/sm/log' else u.path.split('/')[-1]
@@ -660,6 +686,16 @@ class H(BaseHTTPRequestHandler):
             return self.send_json(obj, code)
         body = raw.decode()
         form = parse_qs(body, keep_blank_values=True)
+        if u.path == '/api/wifi':
+            ssid = form.get('ssid', [''])[0].strip()
+            if not ssid:
+                return self.send_json({'error': 'ssid fehlt'}, 400)
+            with lock:
+                gwcfg['ssid'] = ssid
+                if form.get('pass', [''])[0]: gwcfg['pass'] = form['pass'][0]
+                if 'hostname' in form: gwcfg['hostname'] = host_setting(form['hostname'][0])
+                gwcfg['reboots'] += 1
+            return self.send_json({'ok': True, 'reboot': True})
         if u.path == '/api/cli':
             return self.send_json({'ok': True, 'id': submit([form.get('cmd', [''])[0]], False)})
         if u.path == '/api/cli/batch':
@@ -730,7 +766,7 @@ class H(BaseHTTPRequestHandler):
                         return self.send_json({'error': 'WLAN-Passwort fehlt im Backup'}, 400)
                     gwcfg['ssid'] = f('ssid')
                     if 'pass' in form: gwcfg['pass'] = f('pass')
-                    if f('hostname'): gwcfg['hostname'] = f('hostname')
+                    if 'hostname' in form: gwcfg['hostname'] = host_setting(f('hostname'))
                     gwcfg['reboots'] += 1
             if pw: submit(['password ' + pw], False)
             return self.send_json({'ok': True, 'reboot': 'ssid' in form})

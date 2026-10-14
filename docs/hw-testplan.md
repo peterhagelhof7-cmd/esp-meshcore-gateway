@@ -47,6 +47,7 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 - [x] Rollback-Test (optional): Testbuild, der nach 10 s absichtlich abstürzt → Gerät kommt mit alter Version zurück
 - [ ] OLED-Taste: kurz und lang → nur Seitenwechsel, **kein** Abschalten
 - [ ] OLED Seite 4/4 „Nachricht“: Nachricht in `#test` aus der App → Kanal, Uhrzeit, Text mit Umlauten; Alarm-Test → „gesendet“
+- [ ] Hostname automatisch: nach OTA 0.7.4 heißt das Gateway im WLAN `de-xx-ort02-gw` (Fritzbox, Status-Tab); `set name` ändern → Hostname zieht ohne Neustart nach (Ereignis-Log)
 
 ## 7. Sensormeter (M6)
 - [ ] Privaten Kanal „sensormeter“ anlegen (Scope rhein-main ist vorbelegt), als Standardkanal setzen
