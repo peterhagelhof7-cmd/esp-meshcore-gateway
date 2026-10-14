@@ -126,6 +126,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <dt>Hostname</dt><dd id="w_host">–</dd>
 <dt>MAC</dt><dd class="mono" id="w_mac">–</dd>
 <dt>Freier Heap</dt><dd id="g_heap">–</dd>
+<dt>Chiptemperatur</dt><dd id="g_chip" title="Temperatur im ESP32-S3, nicht die Raumtemperatur">–</dd>
 </dl>
 </section>
 </div></div>
@@ -448,6 +449,7 @@ async function refresh(){
     set('w_mode',modes[w.mode]||w.mode);set('w_ssid',w.ssid);set('w_ip',w.ip);
     set('w_rssi',w.rssi?w.rssi+' dBm':null);set('w_host',w.hostname);set('w_mac',w.mac);
     set('g_heap',Math.round(j.gateway.free_heap/1024)+' KB');
+    set('g_chip',typeof j.gateway.chip_temp_c==='number'?j.gateway.chip_temp_c.toFixed(1)+' °C':null);
     set('fw_ver',j.gateway.version+' (MeshCore '+n.firmware+')');set('fw_proj',j.gateway.project);
     set('fw_part',j.gateway.partition+' · '+j.gateway.image_state);
     $('wifiPill').textContent=(modes[w.mode]||w.mode)+' · '+w.ip;
@@ -628,7 +630,9 @@ async function loadChannels(){
       td(c.hash,'mono');
       const k=td('','mono');
       if(c.kind==='private'){const b=document.createElement('button');b.type='button';b.className='chip';b.textContent='anzeigen';
-        b.onclick=()=>{k.textContent=c.key_b64;k.title=c.key_hex};k.appendChild(b)}
+        // Hex wie in der MeshCore-App; Base64 (dieselben 16 Byte) nur klein darunter.
+        b.onclick=()=>{k.textContent=c.key_hex;const s=document.createElement('small');s.style.display='block';
+          s.textContent='Base64: '+c.key_b64;k.appendChild(s);k.title='Hex wie in der MeshCore-App'};k.appendChild(b)}
       else k.textContent=c.kind==='public'?'öffentlich':'aus Name';
       const d=td();const db=document.createElement('button');db.type='button';db.className='chip';db.textContent='löschen';
       db.onclick=async()=>{if(!confirm('Kanal '+c.name+' löschen? Regeln, die ihn nutzen, senden dann nicht mehr.'))return;
@@ -688,6 +692,9 @@ const SM_DEF={alert:'{state} {device}: {metric} {value}{unit} ({op}{threshold}{u
   recover:'OK {device}: {metric} {value}{unit} wieder normal',offline:'OFFLINE {device} nicht erreichbar',online:'ONLINE {device} wieder erreichbar',
   pingDown:'PING-ALARM {device} ({host}) seit {value} s ohne Antwort',pingUp:'PING-OK {device} ({host}) antwortet wieder'};
 let smCfg=null,smSt=null,smEditDev=-1,smEditRule=-1;
+// Pseudo-Gerät „Gateway (intern)“ (E30): Chiptemperatur, Regeln mit device=SM_INT.
+const SM_INT=100,SM_INT_NAME='Gateway (intern)';
+const smDevStatus=i=>(smSt&&(i===SM_INT?smSt.internal:smSt.devices.find(x=>x.idx===i)))||{};
 const smLogFeed=makeFeed('/api/sm/log',$('smLog'),300,()=>true);
 const smLogAdd=smLogFeed.add;
 smLogFeed.add=(cls,text,ts)=>smLogAdd(cls==='A'?'T':(cls==='X'?'F':'s'),text,ts);
@@ -743,16 +750,28 @@ function smRender(){
      ['löschen',async()=>{const n=smCfg.rules.filter(r=>r.device===i).length;
        if(!confirm('Gerät '+d.name+' löschen?'+(n?' Dazu '+n+' Regel(n).':'')))return;
        const c=smCfgForSave();c.devices.splice(i,1);
-       c.rules=c.rules.filter(r=>r.device!==i).map(r=>Object.assign(r,{device:r.device>i?r.device-1:r.device}));
+       c.rules=c.rules.filter(r=>r.device!==i).map(r=>Object.assign(r,{device:r.device>i&&r.device!==SM_INT?r.device-1:r.device}));
        await smSave(c,$('sdMsg'),'Gerät gelöscht')}]].forEach(([t,f])=>{const b=document.createElement('button');b.type='button';b.className='chip';b.textContent=t;b.onclick=f;a.appendChild(b)});
     tb.appendChild(tr);
   });
+  {  // feste Zeile: Gateway selbst (nicht lösch-/editierbar)
+    const s=st.internal||{},tr=document.createElement('tr');
+    const td=(t,cls)=>{const e=document.createElement('td');if(cls)e.className=cls;if(t!==undefined)e.textContent=t;tr.appendChild(e);return e};
+    td(SM_INT_NAME);td('intern','mono');
+    const stc=td();
+    if(!s.polled)stc.textContent='wartet …';
+    else if(s.online){stc.textContent='✓ vor '+ago(s.lastOkAgoS);stc.className='ok'}
+    else{stc.textContent='✗ '+(s.error||'Fehler');stc.className='bad'}
+    td((s.values||[]).map(v=>v.label+' '+fmtVal(v.value)+v.unit).join(' · ')||'–');
+    td().innerHTML='<small>Chip, nicht Raum</small>';
+    tb.appendChild(tr);
+  }
   $('smDevEmpty').hidden=smCfg.devices.length>0;
   // Regeln
   const rb=$('smRuleBody');rb.innerHTML='';
   smCfg.rules.forEach((r,i)=>{
     const s=st.rules.find(x=>x.idx===i)||{};
-    const dev=smCfg.devices[r.device]||{name:'?'};
+    const dev=r.device===SM_INT?{name:SM_INT_NAME}:(smCfg.devices[r.device]||{name:'?'});
     const tr=document.createElement('tr');
     const td=(t,cls)=>{const e=document.createElement('td');if(cls)e.className=cls;if(t!==undefined)e.textContent=t;tr.appendChild(e);return e};
     td(dev.name+' · '+r.path+(r.enabled?'':' (aus)'));
@@ -774,14 +793,14 @@ function smRender(){
   // Regel-Formular: Geräteliste + Messwerte
   const ds=$('srDev'),cur=ds.value;ds.innerHTML='';
   smCfg.devices.forEach((d,i)=>{const o=document.createElement('option');o.value=i;o.textContent=d.name;ds.appendChild(o)});
-  if(cur!==''&&smCfg.devices[cur])ds.value=cur;
-  $('srSave').disabled=smCfg.devices.length===0;
+  {const o=document.createElement('option');o.value=SM_INT;o.textContent=SM_INT_NAME;ds.appendChild(o)}
+  if(cur!==''&&(smCfg.devices[cur]||parseInt(cur)===SM_INT))ds.value=cur;
   if(!$('srPath').dataset.keep)fillPaths();
   $('ssLimit').textContent='Gesendet in der letzten Stunde: '+st.limit.used+' von '+st.limit.max+'.';
   pgRender(st);
 }
 function fillPaths(want){
-  const i=parseInt($('srDev').value),s=(smSt&&smSt.devices.find(x=>x.idx===i))||{};
+  const s=smDevStatus(parseInt($('srDev').value));
   const sel=$('srPath'),cur=want||sel.value;sel.innerHTML='';
   const vals=(s.values||[]).slice();
   if(cur&&!vals.some(v=>v.path===cur))vals.unshift({path:cur,label:cur,unit:'',sensor:''});

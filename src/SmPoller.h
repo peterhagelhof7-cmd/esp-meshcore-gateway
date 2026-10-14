@@ -16,4 +16,6 @@ namespace sm_poller {
   bool pollNow(int deviceIdx);
   // Testnachricht einer Regel mit aktuellem Wert (zählt nicht zum Limit).
   bool sendTest(int ruleIdx, String& err);
+  // Chiptemperatur des ESP32-S3 in °C (alle 60 s gemessen), NAN = noch keine.
+  float chipTempC();
 }

@@ -524,3 +524,25 @@ R8-Image), OTA gleiche Version, Partitionswechsel, Shutdown-Flush des Logs, Repe
 (Grundrauschen −109 dBm, Nachbar RSSI −71…−76 dBm).
 
 **Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün, UI-Test 119/119, Live-Check 6/6.
+
+## E30 – Chiptemperatur als Pseudo-Gerät „Gateway (intern)“ (2026-10-14, User: „gleich einbauen“), 0.7.2
+
+- Das Heltec V4 hat keinen Umgebungssensor. Gemessen wird `temperatureRead()`, also die Temperatur im
+  ESP32-S3. Sie liegt 15–40 °C über der Raumtemperatur und eignet sich als Überhitzungswächter, nicht als
+  Raumthermometer. Die Oberfläche sagt das („Chip, nicht Raum“).
+- Messung alle 60 s im Poller-Task, **vor** der Prüfung von WLAN und „Überwachung an“. Gemessen wird immer,
+  Regeln wertet das Gateway auch ohne WLAN aus, weil die Meldung per Funk rausgeht.
+- Regeln verweisen mit `device = 100` (`sm::INTERNAL_DEVICE`) auf das Pseudo-Gerät, Messwert `gateway.chipTemp`
+  („Chiptemperatur“, °C). Damit funktionieren Hysterese, Mindestdauer, Erinnerung, Entwarnung, Meldungslimit,
+  Test-Button und Backup unverändert. `{device}` in Meldungen = „Gateway“. `sm::deviceOf()` kapselt den
+  Sonderfall. Beim Löschen eines Sensormeters wird `device 100` nicht umnummeriert.
+- `/api/status` liefert `gateway.chip_temp_c`, der Status-Tab zeigt sie an. `/api/sm` liefert `status.internal`, im
+  Überwachungs-Tab steht eine feste Zeile. Im Ereignis-Log gibt es eine Zeile beim Start und dann stündlich.
+
+**Kanalschlüssel-Anzeige (User-Meldung):** „anzeigen“ zeigte Base64 (`YaNVHXWm…`), die MeshCore-App zeigt Hex
+(`61a3551d…`). Der Schlüssel war derselbe, die Anzeige wirkte aber wie ein anderer Schlüssel. Jetzt steht Hex
+vorne, Base64 klein darunter.
+
+**Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün, UI-Test 123/123 (neu: interne
+Zeile, Status, Regel → ALARM-Text, Umnummerierung, Hex-Schlüssel). Am Gerät per OTA: Live-Check 9/9,
+Chiptemperatur 51,7 °C, Log-Zeile, Schlüssel `sps-alarm` = Hex aus der App.

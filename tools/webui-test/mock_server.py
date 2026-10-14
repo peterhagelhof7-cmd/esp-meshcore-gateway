@@ -303,8 +303,10 @@ def ver_tuple(v):
 
 import urllib.request
 
-UNITS = {'temperature': '°C', 'humidity': '%', 'pressureHpa': 'hPa', 'lux': 'lx', 'eco2Ppm': 'ppm'}
-LABELS = {'temperature': 'Temperatur', 'humidity': 'Feuchte', 'pressureHpa': 'Luftdruck', 'lux': 'Helligkeit', 'eco2Ppm': 'eCO2'}
+UNITS = {'temperature': '°C', 'humidity': '%', 'pressureHpa': 'hPa', 'lux': 'lx', 'eco2Ppm': 'ppm', 'chipTemp': '°C'}
+INTERNAL = 100        # Pseudo-Gerät "Gateway (intern)", wie sm::INTERNAL_DEVICE
+CHIP_TEMP = 52.3
+LABELS = {'temperature': 'Temperatur', 'humidity': 'Feuchte', 'pressureHpa': 'Luftdruck', 'lux': 'Helligkeit', 'eco2Ppm': 'eCO2', 'chipTemp': 'Chiptemperatur'}
 
 
 class FakeSm:
@@ -331,7 +333,7 @@ class FakeSm:
         rules = j.get('rules', [])
         if len(rules) > 16: return 'Maximal 16 Regeln'
         for i, r in enumerate(rules):
-            if not (0 <= r.get('device', -1) < len(devs)): return 'Regel %d: Gerät ungültig' % (i + 1)
+            if r.get('device', -1) != INTERNAL and not (0 <= r.get('device', -1) < len(devs)): return 'Regel %d: Gerät ungültig' % (i + 1)
             if '.' not in r.get('path', ''): return 'Regel %d: Messwert fehlt' % (i + 1)
         pings = j.get('pings', [])
         if len(pings) > 5: return 'Maximal 5 Ping-Ziele'
@@ -346,7 +348,7 @@ class FakeSm:
         self.ping_state = [old_p.get(p['host'], {}) for p in pings]
         # Wie SmPoller::syncConfig: Zustand unveränderter Geräte/Regeln behalten
         dkey = lambda d: (d['host'], d.get('port', 80))
-        rkey = lambda r, ds: (dkey(ds[r['device']]), r['path'], r['op'], r['threshold'], r.get('hysteresis', 0), r.get('minDurationS', 0))
+        rkey = lambda r, ds: (('intern', 0) if r['device'] == INTERNAL else dkey(ds[r['device']]), r['path'], r['op'], r['threshold'], r.get('hysteresis', 0), r.get('minDurationS', 0))
         old_d = {dkey(d): s for d, s in zip(self.cfg['devices'], self.dev_state)}
         old_r = {rkey(r, self.cfg['devices']): s for r, s in zip(self.cfg['rules'], self.rule_state)}
         self.dev_state = [old_d.get(dkey(d), {'polled': False}) for d in devs]
@@ -409,8 +411,15 @@ class FakeSm:
         except Exception as e:
             st.update(online=False, fails=st.get('fails', 0) + 1, error=str(e)[:60])
             return
+        self.evaluate(i, d['name'], vals)
+
+    def internal_values(self):
+        return [{'path': 'gateway.chipTemp', 'sensor': '', 'label': 'Chiptemperatur', 'unit': '°C', 'value': CHIP_TEMP}]
+
+    def evaluate(self, i, name, vals):
         for ri, r in enumerate(self.cfg['rules']):
             if r['device'] != i or not r.get('enabled', True): continue
+            d = {'name': name}
             v = next((x['value'] for x in vals if x['path'] == r['path']), None)
             rs = self.rule_state[ri]
             rs['value'] = v
@@ -427,7 +436,8 @@ class FakeSm:
         ch = r.get('channel') or self.cfg['settings']['defaultChannel']
         if self.find(ch) < 0: return 'kein gültiger Kanal'
         tpl = r.get('text') or self.cfg['settings'].get('alertText') or '{state} {device}: {metric} {value}{unit} ({op}{threshold}{unit})'
-        txt = self.render(tpl, self.cfg['devices'][r['device']]['name'], r['path'], self.rule_state[i]['value'], r['op'], r['threshold'], 'TEST')
+        name = 'Gateway' if r['device'] == INTERNAL else self.cfg['devices'][r['device']]['name']
+        txt = self.render(tpl, name, r['path'], self.rule_state[i]['value'], r['op'], r['threshold'], 'TEST')
         if '{state}' not in tpl: txt = 'TEST ' + txt
         self.emit(ch, txt, False)
         return None
@@ -441,8 +451,6 @@ class FakeSm:
             devs.append({'idx': i, 'polled': s.get('polled', False), 'online': s.get('online', False), 'offline': s.get('offline', False),
                          'fails': s.get('fails', 0), 'lastOkAgoS': int(time.time() - s['lastOk']) if s.get('lastOk') else None,
                          'error': s.get('error', ''), 'values': s.get('values', [])})
-        rules = [{'idx': i, 'state': s['state'], 'value': s['value'], 'lastEvent': s['lastEvent'], 'lastEventAgoS': None}
-                 for i, s in enumerate(self.rule_state)]
         now = time.time()
         pst = []
         for i, s in enumerate(self.ping_state):
@@ -450,7 +458,12 @@ class FakeSm:
             pst.append({'idx': i, 'state': st, 'rttMs': s.get('rtt') if s.get('lastOkFlag') else None,
                         'noReplyS': int(now - s.get('lastOk', now)) if s.get('checked') and not s.get('lastOkFlag') else None,
                         'ip': '', 'error': s.get('error', '')})
-        return {'config': c, 'status': {'devices': devs, 'rules': rules, 'pings': pst,
+        self.evaluate(INTERNAL, 'Gateway', self.internal_values())   # wie der Poller alle 60 s
+        rules = [{'idx': i, 'state': s['state'], 'value': s['value'], 'lastEvent': s['lastEvent'], 'lastEventAgoS': None}
+                 for i, s in enumerate(self.rule_state)]
+        internal = {'idx': INTERNAL, 'polled': True, 'online': True, 'offline': False, 'fails': 0, 'lastOkAgoS': 3,
+                    'error': '', 'values': self.internal_values()}
+        return {'config': c, 'status': {'devices': devs, 'internal': internal, 'rules': rules, 'pings': pst,
                                         'limit': {'used': self.sent, 'max': self.cfg['settings']['maxPerHour']}}}
 
 
@@ -583,7 +596,7 @@ class H(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b); return
         if u.path == '/api/status':
             p = cli.p
-            return self.send_json({'gateway': {'version': GW_VERSION, 'uptime_ms': 1000, 'free_heap': 180000, 'cpu_mhz': 240,
+            return self.send_json({'gateway': {'version': GW_VERSION, 'uptime_ms': 1000, 'free_heap': 180000, 'cpu_mhz': 240, 'chip_temp_c': CHIP_TEMP,
                                    'project': GW_PROJECT, 'partition': 'app0', 'image_state': 'gültig'},
               'node': {'name': p['name'], 'pubkey': 'ab' * 32, 'role': 'repeater', 'firmware': 'v1.17.1', 'build_date': '14 Aug 2026',
                        'lat': p['lat'], 'lon': p['lon'], 'forwarding': p['repeat'] == 'on'},

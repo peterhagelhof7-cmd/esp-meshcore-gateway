@@ -84,6 +84,9 @@ static void handleStatus(AsyncWebServerRequest* req) {
   j += String(ESP.getFreeHeap());
   j += ",\"cpu_mhz\":";
   j += String(getCpuFrequencyMhz());
+  float chip = sm_poller::chipTempC();
+  j += ",\"chip_temp_c\":";
+  j += isnan(chip) ? String("null") : String(chip, 1);
   j += ",\"project\":\"";
   j += ota_update::projectId();
   j += "\",\"partition\":\"";
