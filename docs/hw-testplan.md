@@ -49,7 +49,7 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 
 ## 7. Sensormeter (M6)
 - [ ] Privaten Kanal „sensormeter“ anlegen (Scope rhein-main ist vorbelegt), als Standardkanal setzen
-- [ ] Gerät 10.10.0.148 eintragen → Status ✓, Temperatur und Feuchte sichtbar
+- [x] Gerät 10.10.0.148 eintragen → Status ✓, Temperatur und Feuchte sichtbar (2026-10-14: ERSTER-SM .148 + ERSTER-PoE .108, je 60 s, Takt am Gerät bestätigt)
 - [ ] Regel Temperatur > (aktueller Wert − 1) → ALARM kommt in der App an
 - [ ] Grenzwert hochsetzen → Entwarnung (Hysterese beachten)
 - [ ] Sensormeter vom Strom → nach 3 Intervallen OFFLINE-Meldung, danach ONLINE
