@@ -4,12 +4,13 @@
 // (SHA-256, Board-Merkmal) und die an writeFlash übergebenen Daten.
 //   python -I -m http.server 8766 --directory ..\..\docs   (eigenes Fenster)
 //   node flasher_test.js
+//   FLASHER_URL=https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/ node flasher_test.js  (veröffentlichte Seite)
 const puppeteer = require('puppeteer-core');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const chrome = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
-const base = 'http://127.0.0.1:' + (process.env.FLASHER_PORT || 8766) + '/';
+const base = process.env.FLASHER_URL || ('http://127.0.0.1:' + (process.env.FLASHER_PORT || 8766) + '/');
 const docs = path.join(__dirname, '../../docs');
 let fails = 0;
 const check = (name, ok, info) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (info !== undefined ? ' -> ' + info : '')); if (!ok) fails++; };
