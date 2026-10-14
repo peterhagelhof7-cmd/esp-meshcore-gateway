@@ -36,7 +36,19 @@ async function runCli(page, cmd) {
   check('Status: Name gesetzt', (await page.$eval('#n_name', e => e.textContent)) === 'Heltec Repeater');
   check('Status: Laufzeit formatiert', (await page.$eval('#c_up', e => e.textContent)) === '1 h 2 min');
   check('Status: keine Akku-Zeile', !(await page.$('#c_bat')));
-  await page.screenshot({ path: out + '/01_status.png' });
+  const nbWait = async (fn, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await sleep(250); } return false; };
+  // Nachbarn (E34): Kennung, Alter, SNR in dB (Rohwert /4)
+  const nbRows = () => page.$$eval('#nbBody tr', r => r.map(t => [...t.children].map(c => c.textContent)));
+  check('Nachbarn: Tabelle aus "neighbors"', await nbWait(async () => JSON.stringify(await nbRows()) ===
+        JSON.stringify([['AB12CD34', 'vor 2 min', '+12.25 dB'], ['EF56AB78', 'vor 1 h 6 min', '-3 dB']])), JSON.stringify(await nbRows()));
+  const conBefore = await page.evaluate(async () => (await (await fetch('/api/console?since=0')).json()).lines.map(l => l.x).join('|'));
+  check('Nachbarn: Abfrage nicht in der Konsole (quiet)', !conBefore.includes('neighbors'), conBefore.slice(-200));
+  await page.click('#nbScan');
+  check('Nachbarn: Suche gesendet, Countdown', await nbWait(async () => /Suche gesendet \(OK - Discover sent\).*noch \d+ s/.test(await page.$eval('#nbMsg', e => e.textContent))),
+        await page.$eval('#nbMsg', e => e.textContent));
+  check('Nachbarn: neuer Nachbar erscheint', await nbWait(async () => (await nbRows()).some(r => r[0] === '1F2E3D4C' && r[1] === 'vor 3 s' && r[2] === '+5 dB')), JSON.stringify(await nbRows()));
+  check('Nachbarn: Button während der Suche gesperrt', await page.$eval('#nbScan', e => e.disabled));
+  await page.screenshot({ path: out + '/01_status.png', fullPage: true });
 
   await page.click('nav a[data-v=console]');
   await sleep(1500);

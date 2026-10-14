@@ -596,3 +596,20 @@ automatisch, Altwert `meshcore-gw`, Backup leer, Log-Dateiname). Am Gerät noch 
   Commit-Kennungen neu). Sicherung vorher als Bundle außerhalb des Repos.
 - Versions-Tags `v0.1.0` … `v0.7.4` nachgezogen, jeweils auf dem Commit, der die Version einführt.
 - Lizenz GPL-3.0 (`LICENSE`); MeshCore-Anteile (Submodul, Logo, übernommene Stellen) bleiben MIT, Hinweis in `NOTICE`.
+
+## E34 – Nachbarsuche nach dem Start + Nachbarn im Status-Tab (2026-10-14, User: „bau das mit Webanzeige“), 0.7.5
+
+- Anlass: `neighbors` war nach den Updates leer, obwohl Pakete über Repeater ankamen. Upstream trägt Repeater nur
+  bei einem **0-Hop-Advert** (alle `advert.interval`, hansemesh 240 min) oder als Antwort auf `discover.neighbors`
+  ein, die Liste steht nur im RAM. Ein manuelles `discover.neighbors` fand sofort B0A23599 mit +12,25 dB.
+- **90 s nach dem Start** ruft der loopTask einmal `MyMesh::sendNodeDiscoverReq()` auf (ein 0-Hop-Steuerpaket,
+  Antworten innerhalb 60 s, Antwortende sind upstream auf 4 je 2 min begrenzt). Ereignis-Log: „Nachbarsuche nach dem Start
+  gesendet“. Keine periodische Suche, danach füllen die Adverts der Nachbarn die Liste wie bisher.
+- **Status-Tab „Nachbarn“:** Kennung (8 Hex = Anfang des Public Keys), „vor x min/h“, SNR in dB (Upstream-Rohwert / 4).
+  Aktualisierung beim Öffnen und alle 30 s per `neighbors` im Quiet-Modus; `neighbors` zählt dafür jetzt als reine
+  Abfrage (`CliBridge`), landet also weder in der Konsole noch im Flash-Log. Knopf „Jetzt suchen“ sendet
+  `discover.neighbors` und aktualisiert 60 s lang alle 5 s.
+- Namen der Nachbarn zeigt die Liste nicht: der Repeater speichert zu Nachbarn nur Schlüssel, Zeit und SNR.
+
+**Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün, UI-Test 136/136 (neu: Tabelle aus
+`neighbors`, nicht in der Konsole, Suche mit Countdown, neuer Nachbar, Knopf gesperrt). Am Gerät noch offen.

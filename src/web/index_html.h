@@ -129,6 +129,13 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <dt>Chiptemperatur</dt><dd id="g_chip" title="Temperatur im ESP32-S3, nicht die Raumtemperatur">–</dd>
 </dl>
 </section>
+<section>
+<h2>Nachbarn</h2>
+<div class="tbl"><table><thead><tr><th>Repeater</th><th>zuletzt gehört</th><th>SNR</th></tr></thead><tbody id="nbBody"><tr><td colspan="3">–</td></tr></tbody></table></div>
+<div class="row"><button type="button" class="sec" id="nbScan">Jetzt suchen</button></div>
+<div class="msg" id="nbMsg"></div>
+<p class="hint">Repeater in direkter Funkreichweite (0 Hops). Die Liste steht nur im Arbeitsspeicher; nach jedem Start sucht das Gateway nach 90 s einmal selbst. Danach kommen Nachbarn mit ihren 0-Hop-Adverts dazu (meist alle 4 h). Kennung = Anfang des Public Keys wie in der App.</p>
+</section>
 </div></div>
 
 <div class="view" id="v_console">
@@ -412,6 +419,7 @@ function show(v){
   document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.dataset.v===v));
   if(v==='console')setTimeout(()=>$('cliIn').focus(),0);
   if(v==='settings')openSettings();
+  if(v==='status'){lastNb=Date.now();loadNeighbors()}
   if(v==='channels')loadChannels();
   if(v==='sm')smLoad();
   if(v==='wifi')lgLoad();
@@ -950,6 +958,49 @@ async function runJob(cmds,quiet){
   }
   return out;
 }
+/* ---------- Nachbarn (E34) ---------- */
+// Antwort der CLI "neighbors": "-none-" oder Zeilen "KENNUNG:sek_her:snr×4"
+function parseNeighbors(r){
+  const s=val(r);
+  if(!s||s==='-none-')return [];
+  return s.split(/\r?\n/).map(l=>l.trim().split(':')).filter(p=>p.length===3&&/^[0-9A-Fa-f]+$/.test(p[0]))
+    .map(p=>({id:p[0].toUpperCase(),ago:parseInt(p[1],10),snr:parseInt(p[2],10)/4}));
+}
+function agoText(s){
+  if(!(s>=0))return '?';
+  if(s<60)return 'vor '+s+' s';
+  if(s<3600)return 'vor '+Math.floor(s/60)+' min';
+  if(s<86400)return 'vor '+Math.floor(s/3600)+' h '+Math.floor(s%3600/60)+' min';
+  return 'vor '+Math.floor(s/86400)+' d';
+}
+let nbBusy=false;
+async function loadNeighbors(){
+  if(nbBusy)return;nbBusy=true;
+  try{
+    const [r]=await runJob(['neighbors'],true);
+    const list=parseNeighbors(r&&r.reply);
+    const tb=$('nbBody');tb.textContent='';
+    if(!list.length){const tr=tb.insertRow();const td=tr.insertCell();td.colSpan=3;td.textContent='noch keine';}
+    for(const n of list){
+      const tr=tb.insertRow();
+      const a=tr.insertCell();a.className='mono';a.textContent=n.id;
+      tr.insertCell().textContent=agoText(n.ago);
+      tr.insertCell().textContent=(n.snr>0?'+':'')+String(n.snr)+' dB';   // Viertel-dB, z. B. +12.25
+    }
+  }catch(e){}
+  nbBusy=false;
+}
+$('nbScan').onclick=async()=>{
+  const b=$('nbScan');b.disabled=true;
+  try{
+    const [r]=await runJob(['discover.neighbors'],false);
+    $('nbMsg').className='msg';
+    for(let s=60;s>0;s-=5){$('nbMsg').textContent='Suche gesendet ('+val(r&&r.reply)+'), Antworten bis zu 60 s … noch '+s+' s';await loadNeighbors();await sleep(5000);}
+    await loadNeighbors();$('nbMsg').textContent='Suche abgeschlossen';$('nbMsg').className='msg ok';
+  }catch(e){$('nbMsg').textContent=e.message;$('nbMsg').className='msg bad'}
+  b.disabled=false;
+};
+
 const val=r=>String(r||'').replace(/^>\s?/,'').trim();
 const isErr=r=>/^(error|err\b|\?\?|unknown)/i.test(val(r));
 function same(a,b){
@@ -1306,11 +1357,12 @@ async function openSettings(){
 }
 
 /* ---------- Takt ---------- */
-let lastStatus=0,lastSm=0;
+let lastStatus=0,lastSm=0,lastNb=0;
 function tick(){
   if(document.hidden)return;
   const now=Date.now();
   if(now-lastStatus>=5000){lastStatus=now;refresh()}
+  if(view==='status'&&now-lastNb>=30000){lastNb=now;loadNeighbors()}
   if(view==='console')con.poll();
   if(view==='packets')pkt.poll();
   if(view==='channels')msgs.poll();

@@ -220,6 +220,15 @@ void loop() {
   rtc_clock.tick();
 
   // --- Gateway-Erweiterungen ---
+  // Nachbarliste steht nur im RAM und füllt sich sonst erst mit den 0-Hop-
+  // Adverts der Nachbarn (alle advert.interval, hansemesh 4 h). Daher einmal
+  // nach dem Start selbst suchen (E34), Antworten kommen innerhalb 60 s.
+  static bool discover_sent = false;
+  if (!discover_sent && millis() > 90000UL) {
+    discover_sent = true;
+    the_mesh.sendNodeDiscoverReq();
+    event_log::add("MESH", "Nachbarsuche nach dem Start gesendet");
+  }
   mesh_actions::process();
   if (cli_bridge::process()) {
     next_status_update = millis();   // geänderte Einstellungen sofort im Snapshot
