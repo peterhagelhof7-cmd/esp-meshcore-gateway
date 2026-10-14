@@ -936,7 +936,7 @@ function same(a,b){
   const pa=a.split(','),pb=b.split(',');
   if(pa.length!==pb.length)return false;
   return pa.every((x,i)=>{const fx=parseFloat(x),fy=parseFloat(pb[i]);
-    return (!isNaN(fx)&&!isNaN(fy)&&/^[-\d.\s]+$/.test(x)&&/^[-\d.\s]+$/.test(pb[i]))?Math.abs(fx-fy)<1e-6:x.trim()===pb[i].trim()});
+    return (!isNaN(fx)&&!isNaN(fy)&&/^[-\d.\s]+$/.test(x)&&/^[-\d.\s]+$/.test(pb[i]))?Math.abs(fx-fy)<=1e-6*Math.max(1,Math.abs(fy)):x.trim()===pb[i].trim()});
 }
 let needReboot=false;
 function flagReboot(cmds){if(cmds.some(c=>/^set (radio|freq|prv\.key) /.test(c))){needReboot=true;$('rebootBanner').classList.add('on')}}
@@ -984,6 +984,10 @@ function fieldVal(f){
   return $('f_'+f.k).value.trim();
 }
 function setCmd(f,v){return 'set '+f.k+' '+v}
+// MeshCore gibt float32 ungerundet aus (txdelay 0.6999999, Frequenz 869.6179809). Unverändert in ein
+// Zahlenfeld mit step=0.1 geschrieben, blockiert der Browser das Absenden (step mismatch) -> auf
+// 4 Nachkommastellen runden. lat/lon nicht (step=any, 4 Stellen wären nur ~10 m genau).
+function nf(f,v){return f.k!=='lat'&&f.k!=='lon'&&/^-?\d+\.\d{5,}$/.test(v)?String(+(+v).toFixed(4)):v}
 function markChanges(){
   let n=0;
   FK.forEach(f=>{const box=$('fb_'+f.k);if(!box||box.classList.contains('na'))return;
@@ -1020,9 +1024,9 @@ function fill(f,reply){
   if(isErr(reply)){box.classList.add('na');box.querySelectorAll('input,select').forEach(e=>e.disabled=true);
     box.querySelector('small').textContent='Auf diesem Board nicht verfügbar ('+val(reply)+')';loaded[f.k]=null;return}
   box.classList.remove('na');box.querySelectorAll('input,select').forEach(e=>e.disabled=false);
-  let v=val(reply).replace(/%$/,'');
+  let v=nf(f,val(reply).replace(/%$/,''));
   loaded[f.k]=v;
-  if(f.t==='radio'){const p=v.split(',');
+  if(f.t==='radio'){const p=v.split(',');p[0]=nf(f,p[0]);
     $('f_rf').value=parseFloat(p[0]);
     const b=String(parseFloat(p[1]));const sel=$('f_rb');
     if(![...sel.options].some(o=>o.value===b)){const o=document.createElement('option');o.value=b;o.textContent=b+' kHz';sel.appendChild(o)}
@@ -1163,8 +1167,8 @@ $('bkDown').onclick=async()=>{
     if(withKey)gets.push('get prv.key');
     const rep=await runJob(gets,true);
     const cmds=[];
-    fk.forEach((f,i)=>{const r=rep[i].reply;if(isErr(r))return;let v=val(r).replace(/%$/,'');
-      if(f.t==='radio'){const p=v.split(',');v=[parseFloat(p[0]),parseFloat(p[1]),parseInt(p[2]),parseInt(p[3])].join(',')}
+    fk.forEach((f,i)=>{const r=rep[i].reply;if(isErr(r))return;let v=nf(f,val(r).replace(/%$/,''));
+      if(f.t==='radio'){const p=v.split(',');v=[parseFloat(nf(f,p[0])),parseFloat(p[1]),parseInt(p[2]),parseInt(p[3])].join(',')}
       cmds.push(setCmd(f,v))});
     cmds.push(...regionCmds(rep[fk.length].reply));
     if(withKey){const k=val(rep[fk.length+1].reply);if(/^[0-9a-fA-F]{64,}$/.test(k))cmds.push('set prv.key '+k)}

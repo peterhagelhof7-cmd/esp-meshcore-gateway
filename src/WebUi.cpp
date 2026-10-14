@@ -192,6 +192,7 @@ static void handleWifiSave(AsyncWebServerRequest* req) {
   if (host.length() > 0) s.hostname = NetworkManager::sanitizeHostname(host);
   s.wifiPendingTest = true;
   gw_config.set(s);
+  event_log::addf("SYS", "WLAN-Einstellungen gespeichert (%s), Neustart", ssid.c_str());
 
   req->send(200, "application/json", "{\"ok\":true,\"reboot\":true}");
   s_rebootAt = millis() + 1500;
@@ -591,6 +592,7 @@ static void handleOtaDone(AsyncWebServerRequest* req) {
 
 static void handleReboot(AsyncWebServerRequest* req) {
   if (!checkAuth(req)) return;
+  event_log::add("SYS", "Neustart über die Weboberfläche angefordert");
   req->send(200, "application/json", "{\"ok\":true}");
   s_rebootAt = millis() + 1000;
 }

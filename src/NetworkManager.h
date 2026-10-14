@@ -26,6 +26,9 @@ public:
   String hostname() const { return _hostname; }
 
   static String sanitizeHostname(const String& name);
+  // Mitteleuropa mit Sommerzeit. Wird schon in setup() gesetzt: die Systemzeit
+  // überlebt einen Software-Neustart, sonst stehen die ersten Log-Zeilen in UTC.
+  static constexpr const char* TZ_RULE = "CET-1CEST,M3.5.0,M10.5.0/3";
 
   // true genau einmal nach jeder erfolgreichen NTP-Synchronisation
   // (SNTP startet automatisch, sobald die Station eine IP hat).

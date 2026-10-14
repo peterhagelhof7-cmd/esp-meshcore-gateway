@@ -6,7 +6,7 @@
 #   (CommonCLI.cpp) nach, Startzustand = Upstream-Repeater-Defaults
 #
 # Start: python -I mock_server.py [port]
-import json, os, re, sys, threading, time
+import decimal, json, os, re, struct, sys, threading, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -77,6 +77,13 @@ def ftoa(f):
     return s if s else '0'
 
 
+def ftoa32(f):
+    # wie StrHelper::ftoa auf echter HW: float32, abgeschnitten -> 869.618 wird 869.6179809
+    d = decimal.Decimal(struct.unpack('f', struct.pack('f', f))[0])
+    s = format(d.quantize(decimal.Decimal('1e-7'), rounding=decimal.ROUND_DOWN), 'f').rstrip('0')
+    return s + '0' if s.endswith('.') else s
+
+
 class FakeCli:
     """Nachbau der Antwortformate von CommonCLI (1.17.1), nur was die UI nutzt."""
 
@@ -115,13 +122,14 @@ class FakeCli:
 
     def get(self, k):
         p = self.p
-        if k == 'radio': return '> %s,%.3f,%d,%d' % (ftoa(p['freq']), p['bw'], p['sf'], p['cr'])
+        if k == 'radio': return '> %s,%s,%d,%d' % (ftoa32(p['freq']), ftoa(round(p['bw'], 3)), p['sf'], p['cr'])
         if k == 'dutycycle': return '> %.1f%%' % (100.0 / (p['af'] + 1))
         if k == 'agc.reset.interval': return '> %d' % (p['agc'] * 4)
         if k == 'advert.interval': return '> %d' % (p['advert.interval'] * 2)
         if k == 'radio.fem.txgain': return 'Error: unsupported'
         if k == 'prv.key': return '> ' + self.key
-        if k in ('lat', 'lon', 'txdelay', 'direct.txdelay', 'rxdelay'): return '> ' + ftoa(p[k])
+        if k in ('txdelay', 'direct.txdelay', 'rxdelay'): return '> ' + ftoa32(p[k])
+        if k in ('lat', 'lon'): return '> ' + ftoa(p[k])
         if k in p: return '> %s' % p[k]
         return '??: ' + k
 

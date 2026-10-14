@@ -16,8 +16,11 @@
 static const char FW_MARKER[] = "MCGW-FW-ID:" GATEWAY_PROJECT_ID ":" GATEWAY_VERSION ":MCGW-FW-END";
 
 // Arduino-Core-Hook (esp32-hal-misc.c): true = die App markiert sich selbst
-// als gültig, statt dass der Core das sofort beim Start tut.
-bool verifyRollbackLater() { return true; }
+// als gültig, statt dass der Core das sofort beim Start tut. extern "C" ist
+// Pflicht: der Core deklariert die schwache Funktion in C, ohne C-Linkage
+// entsteht ein anderes (C++-)Symbol und der Core bestätigt jede neue Firmware
+// sofort (auf HW gefunden: "gültig" nach 8 s statt "Prüflauf").
+extern "C" bool verifyRollbackLater() { return true; }
 
 namespace {
 struct UploadState {
@@ -42,6 +45,16 @@ void ota_update::begin() {
   esp_ota_img_states_t st;
   if (run && esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) {
     console_log.push('s', 0, "Neue Firmware im Prüflauf - wird nach 60 s stabiler Laufzeit bestätigt");
+  }
+  // Rollback erkennen: der Bootloader hat die andere Partition verworfen und
+  // dieser Start folgt auf einen Absturz -> die neue Firmware ist abgestürzt.
+  const esp_partition_t* bad = esp_ota_get_last_invalid_partition();
+  esp_reset_reason_t rr = esp_reset_reason();
+  if (bad && (rr == ESP_RST_PANIC || rr == ESP_RST_INT_WDT || rr == ESP_RST_TASK_WDT || rr == ESP_RST_WDT)) {
+    char msg[100];
+    snprintf(msg, sizeof(msg), "ROLLBACK: neue Firmware auf %s ist im Prüflauf abgestürzt, vorherige Version läuft", bad->label);
+    console_log.push('s', 0, msg);
+    Serial.printf("[OTA] %s\n", msg);
   }
 }
 

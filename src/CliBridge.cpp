@@ -150,6 +150,7 @@ bool cli_bridge::process() {
     AclEntry acl[32];
     int n = readAcl(acl, 32);
     size_t p = snprintf(reply, sizeof(reply), "ACL: %d Eintrag/Einträge", n);
+    if (log) console_log.push('r', now, reply);
     for (int i = 0; i < n; i++) {
       char line[80];
       snprintf(line, sizeof(line), "\n%02X %s", acl[i].perm, acl[i].pubkeyHex);
