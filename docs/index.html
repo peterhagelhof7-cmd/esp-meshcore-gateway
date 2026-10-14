@@ -43,7 +43,7 @@ a{color:var(--acc)}
 <body>
 <main>
 <h1>MeshCore-Gateway – Web-Flasher</h1>
-<p class="sub">Heltec WiFi LoRa 32 V4 und V4-R8 · Firmware <b id="fwVer">…</b> · <a href="https://github.com/peterhagelhof7-cmd/esp-meshcore-gateway">Quellcode</a></p>
+<p class="sub">Heltec WiFi LoRa 32 V4 und V4-R8 · Firmware <b id="fwVer">…</b> · <a href="https://github.com/peterhagelhof7-cmd/esp-meshcore-gateway/blob/main/docs/admin-guide.md">Admin-Handbuch</a> · <a href="https://github.com/peterhagelhof7-cmd/esp-meshcore-gateway">Quellcode</a></p>
 
 <section id="sReq">
 <h2>Vorbereitung</h2>
@@ -245,7 +245,7 @@ $('btnFlash').onclick = async () => {
     try { await L.after('hard_reset'); } catch (e) {}
     await F.disconnect();
     msg('flashMsg', 'ok', '<b>Fertig: ' + esc(v.project) + ' ' + esc(F.manifest.version) + ' ist installiert.</b><br>' +
-      (erase ? 'Der erste Start dauert ca. 30 s (Dateisystem wird angelegt). Danach öffnet das Gateway den WLAN-Hotspot <b>installer</b> (Passwort <b>installer</b>), Einrichtung unter <b>http://192.168.4.1</b>.'
+      (erase ? 'Der erste Start dauert ca. 30 s (Dateisystem wird angelegt). Danach öffnet das Gateway den WLAN-Hotspot <b>installer</b> (Passwort <b>installer</b>), Einrichtung unter <b>http://192.168.4.1</b> (Login admin / password). <b>Wichtig:</b> Admin-Passwort ändern und die Regionen an deinen Standort anpassen, siehe <a href="https://github.com/peterhagelhof7-cmd/esp-meshcore-gateway/blob/main/docs/admin-guide.md#5-regionen-richtig-einrichten" target="_blank">Admin-Handbuch</a>.'
              : 'Das Gateway startet neu und behält WLAN und Einstellungen.') +
       '<br>Falls es nicht startet: einmal <b>RST</b> drücken.');
     $('btnCheck').disabled = false;
