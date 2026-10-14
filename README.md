@@ -6,6 +6,8 @@ in MeshCore-Kanäle, Firmware-Update per Web mit Board-Prüfung und Rollback.
 
 ## Installieren
 
+**Admin-Handbuch** (Installation, Erstinbetriebnahme, **Regionen**, Betrieb, Updates): [`docs/admin-guide.md`](docs/admin-guide.md)
+
 **Web-Flasher:** https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/
 
 Chrome oder Edge am Computer, Board per USB anschließen. Der Flasher prüft vor dem Schreiben, welches
