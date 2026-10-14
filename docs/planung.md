@@ -129,6 +129,22 @@ Login-Schutz der Weboberfläche ist Pflicht (Konsole kann `erase`, Private-Key-E
 Nach jedem Meilenstein: echter Build, Entscheidungslog `docs/entscheidungen.md`, Commit.
 Flashen auf Hardware nur nach Ansage.
 
+## Vorgemerkt für den nächsten Build
+
+- **WLAN per USB setzen** (User, 2026-10-14): serieller Befehl `gw wifi <SSID> <Passwort> [Hostname]`
+  (und `gw wifi` ohne Argumente = Anzeige ohne Passwort), in `loop()` vor `handleCommand` abfangen,
+  gleiche Speicherlogik wie `handleWifiSave` (wifiPendingTest, Neustart), Passwort in Konsole/Web-Log/
+  Ereignis-Log maskieren (`isSecretCommand`). Zweck: Ersteinrichtung ohne Installer-AP und Rettung,
+  wenn das gespeicherte WLAN nicht mehr erreichbar ist.
+
+## Hardware-Stand
+
+- 2026-10-14: Platine ausgelesen = **Standard-V4** (ESP32-S3 rev v0.2, 2 MB QSPI-PSRAM, 16 MB Flash,
+  USB-Serial/JTAG) → Env `gateway_heltec_v4`. Nach `erase_flash` 0.7.0 geflasht (ohne Backup, nur
+  Werks-Firmware drauf, User-OK). Erststart: Profil angewendet, Installer-AP, WLAN über Web
+  eingerichtet, Status-API im LAN erreichbar, erste Pakete empfangen.
+  Hinweis: `read_flash` der vollen 16 MB über USB-JTAG brach zweimal ab.
+
 ## Risiken
 | Risiko | Bewertung | Gegenmaßnahme |
 |---|---|---|
