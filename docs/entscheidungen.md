@@ -639,3 +639,19 @@ Ablehnung (ohne PSRAM, klassischer ESP32, 8 MB Flash), SHA-256-Fehler, R8-Firmwa
 Ablauf V4 (4 Dateien, Adressen, Parameter, MD5 = Node-MD5, Neustart) und R8 ohne Löschen, Board-Wechsel vor dem
 Schreiben, kein Gerät gewählt, CDN-Bibliotheken ladbar, Handybreite. Dabei gefunden: `dl{display:grid}` überstimmte
 `hidden` (alte Chipdaten blieben stehen) → `[hidden]{display:none!important}`.
+
+## E36 – Regionen raus aus der Empfehlung (2026-10-14, User: „erst die Regionen-Empfehlung umbauen“), 0.7.6
+
+- Bisher legte das Profil beim Erststart `de-he`, `de-by`, `rhein-main` an (E15) und meldete fehlende als Abweichung.
+  Mit dem öffentlichen Web-Flasher bekommen das auch Gateways in anderen Gegenden: dort falsche Regionen, und
+  „Abweichungen übernehmen“ hätte sie nach einer Korrektur wieder angelegt.
+- Regionen sind standortabhängig, es gibt keine für alle richtige Vorgabe. Deshalb **nicht einstellbar gemacht,
+  sondern ganz aus dem Profil genommen** (19 statt 23 Einträge). Erststart legt keine Regionen an.
+- Stattdessen warnt **Einstellungen → Regionen** („Keine Region angelegt …“ mit Link ins Admin-Handbuch), solange der
+  Baum aus `region` nur `*` enthält.
+- Bestehende Geräte behalten ihre Regionen (MeshCore-Prefs), Backups enthalten sie weiterhin.
+- Admin-Handbuch Abschnitt 4/5 angepasst.
+
+**Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün, UI-Test 140/140 (neu: Profil ohne
+Regionen, Warnung bei leerem Baum, Profil-Übernahme legt keine Regionen an, von Hand angelegt → Warnung weg, Profil
+bleibt „Alles wie empfohlen“). Live-Check prüft zusätzlich: Gerät hat Regionen, keine Warnung.

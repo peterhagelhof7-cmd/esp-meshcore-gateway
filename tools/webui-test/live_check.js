@@ -33,6 +33,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check('Formular: txdelay gerundet', f.txd === '0.7', f.txd);
   check('Formular: Browser-Validierung ok (Speichern möglich)', f.valid, f.invalid.join(', '));
   check('Formular: keine Scheinänderung', f.save === true && f.msg === '', JSON.stringify(f.msg));
+  // Regionen (E36): Gerät hat eigene Regionen -> keine Warnung
+  await waitFor(async () => /\S/.test(await text('#regOut')) && (await text('#regOut')) !== '…');
+  check('Regionen: angelegt, keine Warnung', await page.$eval('#regWarn', e => e.hidden) && /\n\s*\S+.* F/.test(await text('#regOut')), JSON.stringify(await text('#regOut')));
 
   await page.click('nav a[data-v=sm]').catch(() => {});
   const intRow = async () => page.$$eval('#smDevBody tr', r => { const x = r.find(t => t.children[0].textContent === 'Gateway (intern)'); return x ? [...x.children].map(c => c.textContent) : null; });
