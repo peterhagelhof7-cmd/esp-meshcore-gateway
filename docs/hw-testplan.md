@@ -79,5 +79,5 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 
 ## Web-Flasher (E35)
 
-- [ ] https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/ in Chrome: „Verbinden & prüfen“ am Standard-V4 → „Erkannt: Heltec WiFi LoRa 32 V4 (ESP32-S3R2, 2 MB PSRAM)“, Ausstattung zeigt „Embedded PSRAM 2MB“ (nur prüfen reicht, danach „Neu prüfen“/Tab schließen; das Gateway startet dabei neu)
+- [x] https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/ in Chrome: „Verbinden & prüfen“ am Standard-V4 → „Erkannt: Heltec WiFi LoRa 32 V4 (ESP32-S3R2, 2 MB PSRAM)“, Ausstattung zeigt „Embedded PSRAM 2MB“ (nur prüfen reicht, danach „Neu prüfen“/Tab schließen; das Gateway startet dabei neu) (2026-10-14 User: erkannt V4 2 MB; Gateway danach normal neu gestartet, 0.7.5 gültig)
 - [ ] Optional: Installieren ohne Löschen → 0.7.5 bleibt mit allen Einstellungen
