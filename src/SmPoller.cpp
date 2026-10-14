@@ -338,7 +338,7 @@ void pingCycle() {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     PingTarget t = R->cfg.pings[pi];
     uint32_t now = millis();
-    bool due = t.used && t.enabled && (!R->ping[pi].checked || now - R->ping[pi].lastCheckMs >= PING_INTERVAL_S * 1000UL);
+    bool due = t.used && t.enabled && (!R->ping[pi].checked || now - R->ping[pi].lastCheckMs >= t.intervalS * 1000UL);
     uint32_t gen = R->gen;
     xSemaphoreGive(s_lock);
     if (!due) continue;

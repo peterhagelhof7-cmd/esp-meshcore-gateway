@@ -1,6 +1,6 @@
 # ESP-MeshCore-Gateway – Planung
 
-Stand: 2026-10-14 · Status: **M0–M7 implementiert (0.6.0), Hardware-Test ausstehend**
+Stand: 2026-10-14 · Status: **M0–M7 implementiert (0.6.1), Hardware-Test ausstehend**
 
 ## Entscheidungen (2026-10-13, vom User bestätigt)
 - **Rolle:** Repeater als Basis + protokollkonformes Kanal-Senden (Details: `entscheidungen.md` E1)
@@ -123,7 +123,7 @@ Login-Schutz der Weboberfläche ist Pflicht (Konsole kann `erase`, Private-Key-E
 | M4 🟡 | Kanäle: Verwaltung (Public/Hashtag/Privat, Scope) + Senden + Empfang (E18) | Build grün, UI-Test gegen Mock (2026-10-14); **Funk-Test mit App offen** |
 | M5 🟡 | OTA mit Board-Merkmal + Downgrade-Schutz + Rollback (E19), eigene OLED-Anzeige (E20); NTP schon in M3 | Build grün V4 + R8, Host-Test Merkmal 35/35 je Board, UI-Test (2026-10-14); **HW-Test offen** |
 | M6 🟡 | Sensormeter-Poller (Core-0-Task) + Regel-Engine + Web-Tab (E22) | Build grün V4 + R8, Host-Tests grün, UI-Test 78/78 inkl. echtem Sensormeter (2026-10-14); **HW-Test offen** |
-| M7 🟡 | Ping-Check: max. 5 Ziele, Ausfall länger als Schwellwert → Alarmkanal (E25) | Build grün V4 + R8, Host-Tests grün, UI-Test 95/95 mit echten Pings (2026-10-14); **HW-Test offen** |
+| M7 🟡 | Ping-Check: max. 5 Ziele, Ausfall länger als Schwellwert → Alarmkanal, Prüfabstand pro Ziel (E25, E26) | Build grün V4 + R8, Host-Tests grün, UI-Test 100/100 mit echten Pings (2026-10-14, v0.6.1); **HW-Test offen** |
 
 Nach jedem Meilenstein: echter Build, Entscheidungslog `docs/entscheidungen.md`, Commit.
 Flashen auf Hardware nur nach Ansage.

@@ -253,13 +253,27 @@ async function runCli(page, cmd) {
     await page.click('#pgSave');
     check('Ping: Schwellwert < 10 s abgelehnt', await until(async () => (await t('#pgMsg')).includes('Schwellwert')), await t('#pgMsg'));
     await setVal('#pgThr', '60');
+    await setVal('#pgIv', '5');
+    await page.$eval('#pgMsg', e => e.textContent = '');
     await page.click('#pgSave');
+    check('Ping: Prüfabstand < 10 s abgelehnt', await until(async () => (await t('#pgMsg')).includes('Prüfabstand')), await t('#pgMsg'));
+    await setVal('#pgIv', '90');
+    await page.$eval('#pgMsg', e => e.textContent = '');
+    await page.click('#pgSave');
+    check('Ping: Schwellwert < Prüfabstand abgelehnt', await until(async () => (await t('#pgMsg')).includes('mind. Prüfabstand')), await t('#pgMsg'));
+    await setVal('#pgIv', '30');
+    await page.click('#pgSave');
+    check('Ping: Prüfabstand in Tabelle', await until(async () => ((await rows('#pgBody'))[0]?.[2] || '') === '60 s / alle 30 s'), JSON.stringify(await rows('#pgBody')));
+    check('Ping: Formular nach Speichern zurück auf 10 s', (await page.$eval('#pgIv', e => e.value)) === '10');
     check('Ping: erreichbares Ziel ✓ mit ms', await until(async () => /✓ \d+ ms/.test((await rows('#pgBody'))[0]?.[3] || ''), 15000), JSON.stringify(await rows('#pgBody')));
+    await page.$$eval('#pgBody tr', r => r[0].querySelectorAll('button')[0].click());
+    check('Ping: Bearbeiten lädt Prüfabstand', (await page.$eval('#pgIv', e => e.value)) === '30');
+    await page.click('#pgCancel');
     await setVal('#pgName', 'Testziel');
     await setVal('#pgHost', '192.0.2.1');   // TEST-NET-1, antwortet garantiert nie
     await setVal('#pgThr', '10');
     await page.click('#pgSave');
-    check('Ping: unerreichbares Ziel -> ALARM nach Schwellwert', await until(async () => ((await rows('#pgBody'))[1]?.[3] || '').startsWith('ALARM'), 25000), JSON.stringify(await rows('#pgBody')));
+    check('Ping: unerreichbares Ziel -> ALARM nach Schwellwert', await until(async () => ((await rows('#pgBody'))[1]?.[3] || '').startsWith('ALARM'), 35000), JSON.stringify(await rows('#pgBody')));
     check('Ping: Meldung im Alarmkanal', await until(async () => /#test -> PING-ALARM Testziel \(192\.0\.2\.1\) seit 1\d s ohne Antwort/.test(await t('#smLog'))), (await t('#smLog')).slice(-200));
     for (const n of ['Z3', 'Z4', 'Z5']) { await setVal('#pgName', n); await setVal('#pgHost', '192.0.2.' + n[1]); await setVal('#pgThr', '600'); await page.$eval('#pgMsg', e => e.textContent = ''); await page.click('#pgSave'); await until(async () => (await t('#pgMsg')) === 'Ping-Ziel angelegt'); }
     await setVal('#pgName', 'Z6'); await setVal('#pgHost', '192.0.2.6');
@@ -331,7 +345,8 @@ async function runCli(page, cmd) {
         bk.sensormeter.rules[0].channel === 'sensormeter' && bk.sensormeter.settings.defaultChannel === '#test' && bk.sensormeter.devices[0].pass === '',
         JSON.stringify(bk.sensormeter && bk.sensormeter.rules));
   check('Backup: Ping-Ziele enthalten', !!bk.sensormeter && Array.isArray(bk.sensormeter.pings) && bk.sensormeter.pings.length === 2 &&
-        bk.sensormeter.pings[1].host === '192.0.2.1' && bk.sensormeter.pings[1].thresholdS === 10, JSON.stringify(bk.sensormeter && bk.sensormeter.pings));
+        bk.sensormeter.pings[1].host === '192.0.2.1' && bk.sensormeter.pings[1].thresholdS === 10 &&
+        bk.sensormeter.pings[0].intervalS === 30 && bk.sensormeter.pings[1].intervalS === 10, JSON.stringify(bk.sensormeter && bk.sensormeter.pings));
   check('Backup: Kanäle enthalten', Array.isArray(bk.channels) && bk.channels.length === 3 && bk.channels.some(c => c.name === 'sensormeter' && c.key === 'ABEiM0RVZneImaq7zN3u/w==' && c.scope === 'rhein-main'), JSON.stringify(bk.channels));
 
   // Zustand verstellen, dann Backup einspielen

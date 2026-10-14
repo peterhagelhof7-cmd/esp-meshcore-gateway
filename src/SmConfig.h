@@ -11,7 +11,9 @@ namespace sm {
 static const int MAX_DEVICES = 8;
 static const int MAX_RULES = 16;
 static const int MAX_PINGS = 5;
-static const uint16_t PING_INTERVAL_S = 10;   // Prüfabstand je Ziel
+static const uint16_t PING_INTERVAL_MIN_S = 10;    // Prüfabstand je Ziel: 10..3600 s
+static const uint16_t PING_INTERVAL_MAX_S = 3600;
+static const uint16_t PING_INTERVAL_DEF_S = 10;
 
 struct Device {
   bool used;
@@ -47,7 +49,8 @@ struct PingTarget {
   bool enabled;
   char name[24];        // Bezeichner (Pflicht)
   char host[64];        // IP oder Hostname
-  uint16_t thresholdS;  // max. Ausfallzeit, 10..86400 (uint16: bis 18 h)
+  uint16_t thresholdS;  // max. Ausfallzeit, intervalS..65535 s
+  uint16_t intervalS;   // Prüfabstand, PING_INTERVAL_MIN_S..PING_INTERVAL_MAX_S
 };
 
 struct Settings {
