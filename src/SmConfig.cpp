@@ -116,12 +116,17 @@ static bool parse(const char* json, size_t len, const Config& old, Config& c, St
     cpy(x.name, sizeof(x.name), pg["name"] | "");
     cpy(x.host, sizeof(x.host), pg["host"] | "");
     long thr = pg["thresholdS"] | 60L;
+    long iv = pg["intervalS"] | (long)PING_INTERVAL_DEF_S;   // fehlt in Konfigs vor 0.6.1
     if (!x.name[0]) { err = "Ping-Ziel " + String(i + 1) + ": Bezeichner fehlt"; return false; }
     if (!validHost(x.host)) { err = String("Ping-Ziel ") + x.name + ": Name/IP ungültig"; return false; }
-    if (thr < PING_INTERVAL_S || thr > 65535) {
-      err = String("Ping-Ziel ") + x.name + ": Schwellwert " + PING_INTERVAL_S + "-65535 s"; return false;
+    if (iv < PING_INTERVAL_MIN_S || iv > PING_INTERVAL_MAX_S) {
+      err = String("Ping-Ziel ") + x.name + ": Prüfabstand " + PING_INTERVAL_MIN_S + "-" + PING_INTERVAL_MAX_S + " s"; return false;
+    }
+    if (thr < iv || thr > 65535) {
+      err = String("Ping-Ziel ") + x.name + ": Schwellwert " + iv + "-65535 s (mind. Prüfabstand)"; return false;
     }
     x.thresholdS = (uint16_t)thr;
+    x.intervalS = (uint16_t)iv;
     i++;
   }
   return true;
@@ -180,6 +185,7 @@ static void serialize(const Config& c, String& out, bool maskPass) {
     p["name"] = x.name;
     p["host"] = x.host;
     p["thresholdS"] = x.thresholdS;
+    p["intervalS"] = x.intervalS;
   }
   serializeJson(doc, out);
 }

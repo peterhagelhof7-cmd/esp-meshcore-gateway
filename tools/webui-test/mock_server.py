@@ -292,7 +292,10 @@ class FakeSm:
         for i, pg in enumerate(pings):
             if not pg.get('name'): return 'Ping-Ziel %d: Bezeichner fehlt' % (i + 1)
             if not re.fullmatch(r'[A-Za-z0-9._-]+', pg.get('host', '')): return 'Ping-Ziel %s: Name/IP ungültig' % pg['name']
-            if not (10 <= int(pg.get('thresholdS', 0)) <= 65535): return 'Ping-Ziel %s: Schwellwert 10-65535 s' % pg['name']
+            pg.setdefault('intervalS', 10)
+            iv = int(pg['intervalS'])
+            if not (10 <= iv <= 3600): return 'Ping-Ziel %s: Prüfabstand 10-3600 s' % pg['name']
+            if not (iv <= int(pg.get('thresholdS', 0)) <= 65535): return 'Ping-Ziel %s: Schwellwert %d-65535 s (mind. Prüfabstand)' % (pg['name'], iv)
         old_p = {p['host']: s for p, s in zip(self.cfg.get('pings', []), self.ping_state)}
         self.ping_state = [old_p.get(p['host'], {}) for p in pings]
         # Wie SmPoller::syncConfig: Zustand unveränderter Geräte/Regeln behalten
@@ -426,9 +429,11 @@ PING_CHECK_S = 2   # im Mock schneller als die Firmware (10 s), damit der Test k
 
 def ping_loop():
     while True:
-        time.sleep(PING_CHECK_S)
+        time.sleep(1)
         with lock:
-            targets = [(i, dict(p)) for i, p in enumerate(smm.cfg.get('pings', []))]
+            now = time.time()
+            targets = [(i, dict(p)) for i, p in enumerate(smm.cfg.get('pings', []))
+                       if i < len(smm.ping_state) and now - smm.ping_state[i].get('lastCheck', 0) >= p.get('intervalS', PING_CHECK_S)]
         for i, p in targets:
             if not p.get('enabled', True): continue
             ok, rtt, err = real_ping(p['host'])
@@ -437,7 +442,7 @@ def ping_loop():
                 s = smm.ping_state[i]
                 now = time.time()
                 s.setdefault('lastOk', now)
-                s.update(checked=True, lastOkFlag=ok, error=err)
+                s.update(checked=True, lastOkFlag=ok, error=err, lastCheck=now)
                 if ok:
                     s['rtt'] = rtt; s['lastOk'] = now
                     if s.get('down'):

@@ -57,7 +57,7 @@ noch nichts geprüft. Reihenfolge so wählen, dass ein Fehler früh auffällt un
 - [ ] Mehr als 6 Meldungen/h provozieren → Rest „unterdrückt“ im Meldungs-Log
 
 ## 8. Ping-Check (M7)
-- [ ] Router/NAS als Ping-Ziel (Schwelle 60 s) → Status ✓ mit ms
+- [ ] Router/NAS als Ping-Ziel (Schwelle 60 s, Prüfabstand 30 s) → Status ✓ mit ms, Tabelle „60 s / alle 30 s“
 - [ ] Ziel `192.0.2.1`, Schwelle 30 s → nach ca. 30–40 s PING-ALARM im Alarmkanal (App)
 - [ ] Ziel per Hostname (DNS) → IP wird angezeigt
 - [ ] Gerät kurz vom Netz (unter Schwelle) → keine Meldung; länger → Alarm, danach PING-OK

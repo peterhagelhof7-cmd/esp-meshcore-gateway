@@ -226,13 +226,14 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 
 <section style="margin-bottom:16px">
 <h2>Ping-Check</h2>
-<div class="tbl"><table><thead><tr><th>Bezeichner</th><th>Ziel</th><th>Schwelle</th><th>Status</th><th></th></tr></thead><tbody id="pgBody"></tbody></table></div>
+<div class="tbl"><table><thead><tr><th>Bezeichner</th><th>Ziel</th><th>Schwelle / Prüfabstand</th><th>Status</th><th></th></tr></thead><tbody id="pgBody"></tbody></table></div>
 <p class="hint" id="pgEmpty" hidden>Noch keine Ping-Ziele (max. 5).</p>
 <div class="form" style="margin-top:14px">
 <div class="grp" id="pgTitle">Ping-Ziel hinzufügen</div>
 <label for="pgName">Bezeichner</label><div class="fld"><input id="pgName" maxlength="23" placeholder="z. B. Router"><small>Pflicht, erscheint in der Meldung</small></div>
 <label for="pgHost">Name oder IP</label><div class="fld"><input id="pgHost" maxlength="63" placeholder="10.10.0.1 oder nas.example.de" spellcheck="false"></div>
-<label for="pgThr">Schwellwert (s)</label><div class="fld"><input id="pgThr" type="number" min="10" max="65535" value="60"><small>Antwortet das Ziel länger als so viele Sekunden nicht, geht eine Meldung in den Alarmkanal. Geprüft wird alle 10 s.</small></div>
+<label for="pgThr">Schwellwert (s)</label><div class="fld"><input id="pgThr" type="number" min="10" max="65535" value="60"><small>Antwortet das Ziel länger als so viele Sekunden nicht, geht eine Meldung in den Alarmkanal. Mindestens so groß wie der Prüfabstand.</small></div>
+<label for="pgIv">Prüfabstand (s)</label><div class="fld"><input id="pgIv" type="number" min="10" max="3600" value="10"><small>10–3600 s, je Prüfung 3 Pings (eine Antwort genügt)</small></div>
 <label>Optionen</label><div class="fld"><label class="chk"><input type="checkbox" id="pgEn" checked> aktiv</label></div>
 </div>
 <div class="row"><button type="button" id="pgSave">Ping-Ziel speichern</button><button type="button" class="sec" id="pgCancel" hidden>Abbrechen</button><span class="msg" id="pgMsg" style="margin:0"></span></div>
@@ -852,7 +853,7 @@ function pgRender(st){
     const td=(t,cls)=>{const e=document.createElement('td');if(cls)e.className=cls;if(t!==undefined)e.textContent=t;tr.appendChild(e);return e};
     td(p.name+(p.enabled?'':' (aus)'));
     td(p.host+(s.ip&&s.ip!==p.host?' ('+s.ip+')':''),'mono');
-    td(p.thresholdS+' s');
+    td(p.thresholdS+' s / alle '+(p.intervalS||10)+' s');
     const z=td();
     if(!p.enabled)z.textContent='deaktiviert';
     else if(s.state==='up'){z.textContent='✓ '+s.rttMs+' ms';z.className='ok'}
@@ -860,7 +861,7 @@ function pgRender(st){
     else if(s.state==='failing'){z.textContent='✗ '+(s.error||'keine Antwort')+' ('+ago(s.noReplyS)+')';z.className='warn'}
     else z.textContent='wartet …';
     const a=td();
-    [['bearbeiten',()=>{pgEdit=i;$('pgName').value=p.name;$('pgHost').value=p.host;$('pgThr').value=p.thresholdS;$('pgEn').checked=p.enabled;
+    [['bearbeiten',()=>{pgEdit=i;$('pgName').value=p.name;$('pgHost').value=p.host;$('pgThr').value=p.thresholdS;$('pgIv').value=p.intervalS||10;$('pgEn').checked=p.enabled;
         $('pgTitle').textContent='Ping-Ziel bearbeiten: '+p.name;$('pgCancel').hidden=false}],
      ['löschen',async()=>{if(!confirm('Ping-Ziel '+p.name+' löschen?'))return;const c=smCfgForSave();c.pings.splice(i,1);await smSave(c,$('pgMsg'),'Ping-Ziel gelöscht')}]]
       .forEach(([t,f])=>{const b=document.createElement('button');b.type='button';b.className='chip';b.textContent=t;b.onclick=f;a.appendChild(b)});
@@ -868,10 +869,10 @@ function pgRender(st){
   });
   $('pgEmpty').hidden=pings.length>0;
 }
-function pgReset(){pgEdit=-1;$('pgName').value=$('pgHost').value='';$('pgThr').value=60;$('pgEn').checked=true;$('pgTitle').textContent='Ping-Ziel hinzufügen';$('pgCancel').hidden=true}
+function pgReset(){pgEdit=-1;$('pgName').value=$('pgHost').value='';$('pgThr').value=60;$('pgIv').value=10;$('pgEn').checked=true;$('pgTitle').textContent='Ping-Ziel hinzufügen';$('pgCancel').hidden=true}
 $('pgCancel').onclick=pgReset;
 $('pgSave').onclick=async()=>{
-  const p={name:$('pgName').value.trim(),host:$('pgHost').value.trim(),thresholdS:parseInt($('pgThr').value)||0,enabled:$('pgEn').checked};
+  const p={name:$('pgName').value.trim(),host:$('pgHost').value.trim(),thresholdS:parseInt($('pgThr').value)||0,intervalS:parseInt($('pgIv').value)||0,enabled:$('pgEn').checked};
   if(!p.name){$('pgMsg').textContent='Bezeichner angeben (Pflicht)';$('pgMsg').className='msg bad';return}
   if(!p.host){$('pgMsg').textContent='Name oder IP angeben';$('pgMsg').className='msg bad';return}
   const c=smCfgForSave();c.pings=c.pings||[];

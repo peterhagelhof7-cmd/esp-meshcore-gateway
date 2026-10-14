@@ -417,3 +417,20 @@ folgt eine Entwarnung. Nicht gemeint ist eine Antwortzeit (RTT) in Sekunden; die
 **echt**: das Sensormeter `.148` antwortet in ca. 3 ms, `192.0.2.1` (TEST-NET) nie, und der Alarm kommt
 nach 10 s im Alarmkanal an. **Nicht HW-verifiziert:** `esp_ping` auf dem ESP32.
 Version 0.6.0.
+
+## E26 – Ping-Check: Auslegung bestätigt, Prüfabstand pro Ziel (2026-10-14, User)
+User-Antwort zu E25: (1) Schwellwert = maximale Ausfallzeit **bestätigt**, (2) Entwarnung PING-OK
+**bestätigt**, (3) Prüfabstand **pro Ziel einstellbar**.
+
+**Umsetzung:**
+- Neues Feld `intervalS` je Ziel: **10–3600 s**, Standard 10 s. Fehlt das Feld (Konfig/Backup vor 0.6.1),
+  gilt 10 s, also das bisherige Verhalten. Gespeichert wird weiter als JSON in NVS, eine Migration ist nicht nötig.
+- Der Schwellwert muss **mindestens so groß wie der Prüfabstand** sein (sonst Fehlermeldung beim Speichern).
+  Kleinere Werte wären ohnehin erst bei der nächsten Prüfung wirksam.
+- Pro Prüfung weiter 3 Echos, eine Antwort genügt. Der Alarm kommt frühestens nach dem Schwellwert und spätestens
+  nach Schwellwert + Prüfabstand.
+- UI: Feld „Prüfabstand (s)“ im Formular, Tabelle zeigt „60 s / alle 30 s“.
+
+**Verifikation:** Build V4 + R8 grün (0 Warnungen in src/), Host-Tests grün, UI-Test **100/100**
+(neu: Prüfabstand < 10 s abgelehnt, Schwellwert < Prüfabstand abgelehnt, Anzeige, Bearbeiten, Backup).
+Version 0.6.1. **Nicht HW-verifiziert.**
