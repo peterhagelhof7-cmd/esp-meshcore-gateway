@@ -1,5 +1,5 @@
 {
-    "version":  "0.7.5",
+    "version":  "0.7.6",
     "built":  "2026-10-14",
     "flash_size":  "16MB",
     "variants":  {
@@ -29,8 +29,8 @@
                                               {
                                                   "name":  "firmware.bin",
                                                   "address":  65536,
-                                                  "size":  1338608,
-                                                  "sha256":  "86a448049ceb104c8b07908b0ed3b2f9d808c4c709645e4a089a90b260e680cf"
+                                                  "size":  1339008,
+                                                  "sha256":  "c2ee66af8620dc33ae2e651da8c14704f60330899b9f3c5debb45f56ebf6e591"
                                               }
                                           ]
                             },
@@ -60,8 +60,8 @@
                                               {
                                                   "name":  "firmware.bin",
                                                   "address":  65536,
-                                                  "size":  1342048,
-                                                  "sha256":  "2a72aaf3ec5e7aae144f72c6f926dc68242e552f4ab37b5e3f3a2e80277e8305"
+                                                  "size":  1342432,
+                                                  "sha256":  "635b18d435cb6586b943881ebeb651781c3bf3597fe44820aaa5143bd01771d0"
                                               }
                                           ]
                             }
