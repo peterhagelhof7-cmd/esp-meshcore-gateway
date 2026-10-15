@@ -31,6 +31,9 @@ dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
 .ok{background:var(--ok-bg);color:var(--ok)}.bad{background:var(--bad-bg);color:var(--bad)}.warn{background:var(--warn-bg);color:var(--warn)}
 label.chk{display:flex;gap:8px;align-items:flex-start;margin-top:10px}
 label.chk input{margin-top:4px}
+label.fld{display:block;font-weight:600;margin-bottom:4px}
+select{font:inherit;width:100%;max-width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--txt)}
+.hint.warn{color:var(--warn);background:transparent}
 .hint{color:var(--muted);font-size:13px;margin:8px 0 0}
 progress{width:100%;height:14px;margin-top:12px}
 pre{background:var(--mono-bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:260px;overflow:auto;
@@ -70,6 +73,9 @@ a{color:var(--acc)}
 
 <section id="sFlash">
 <h2>2 · Firmware installieren</h2>
+<label class="fld" for="fwSel">Version</label>
+<select id="fwSel"></select>
+<p class="hint" id="fwNote"></p>
 <label class="chk"><input type="checkbox" id="optErase" checked><span><b>Flash vorher komplett löschen</b> (empfohlen bei der Erstinstallation oder wenn vorher eine andere Firmware lief). Löscht WLAN-Zugang, Kanäle, Einstellungen und die Knoten-Identität.</span></label>
 <p class="hint">Ein laufendes Gateway aktualisierst du besser in seiner Weboberfläche unter <b>System → Firmware-Update</b>: das behält alle Einstellungen und prüft das Board ebenfalls.</p>
 <div class="row"><button id="btnFlash" disabled>Installieren</button><button class="sec" id="btnReset" hidden>Neu prüfen</button></div>
@@ -88,7 +94,8 @@ a{color:var(--acc)}
 // Ablauf (docs/entscheidungen.md E35):
 //  1. Verbinden, Chip lesen. Erlaubt ist nur ESP32-S3 mit 16 MB Flash; die
 //     eFuse PSRAM_CAP entscheidet die Variante (2 = 2 MB = V4, 1 = 8 MB = V4-R8).
-//  2. Dateien laden, SHA-256 gegen manifest.json und das Board-Merkmal
+//  2. Dateien der gewählten Version laden (E38: manifest.json führt mehrere,
+//     vorausgewählt ist die neueste bewährte), SHA-256 und das Board-Merkmal
 //     "MCGW-FW-ID:<Board>:<Version>:" in firmware.bin prüfen.
 //  3. Direkt vor dem Schreiben PSRAM erneut lesen (gleiche Verbindung),
 //     dann schreiben, esptool-js prüft jede Datei per MD5 nach.
@@ -100,13 +107,36 @@ const hideMsg = id => { $(id).className = 'msg'; };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const F = window.gwFlasher = {
-  manifest: null, loader: null, variant: null,
+  manifest: null, release: null, loader: null, variant: null,
+
+  statusText: { stable: 'bewährt', test: 'neu, in Erprobung' },
+
+  // Vorauswahl: neueste bewährte Version, sonst die neueste
+  defaultRelease(manifest) {
+    return manifest.releases.find(r => r.status === 'stable') || manifest.releases[0];
+  },
+
+  selectRelease(version) {
+    const r = F.manifest.releases.find(x => x.version === version);
+    if (!r) throw new Error('Version ' + version + ' nicht vorhanden');
+    F.release = r;
+    $('fwSel').value = r.version;
+    const mc = r.meshcore ? ' · MeshCore ' + r.meshcore : '';
+    if (r.status === 'stable') {
+      $('fwNote').className = 'hint';
+      $('fwNote').textContent = 'Bewährte Version (gebaut ' + r.built + mc + ').';
+    } else {
+      $('fwNote').className = 'hint warn';
+      $('fwNote').textContent = 'Neue Version (gebaut ' + r.built + mc + '), läuft noch nicht lange im Echtbetrieb. Für den Dauerbetrieb die bewährte Version wählen.';
+    }
+    return r;
+  },
 
   // Variante aus den gelesenen Chipdaten, oder {error}
-  pickVariant(info, manifest) {
+  pickVariant(info, manifest, release = F.release) {
     if (!/ESP32-S3/i.test(info.chip)) return { error: 'Kein ESP32-S3 (' + info.chip + '). Das ist kein Heltec V4.' };
     if (info.flashSize !== manifest.flash_size) return { error: 'Flash ' + info.flashSize + ' statt ' + manifest.flash_size + '. Das ist kein Heltec V4.' };
-    for (const [key, v] of Object.entries(manifest.variants)) {
+    for (const [key, v] of Object.entries(release.variants)) {
       if (v.psram_cap === info.psramCap) return { key, ...v };
     }
     const what = info.psramCap === 0 ? 'ohne PSRAM' : 'mit PSRAM-Kennung ' + info.psramCap;
@@ -119,21 +149,21 @@ const F = window.gwFlasher = {
   },
 
   // Firmware-Dateien laden und prüfen. Rückgabe: fileArray für writeFlash
-  async loadFiles(key, manifest, fetchFn = fetch) {
-    const v = manifest.variants[key];
+  async loadFiles(key, release, fetchFn = fetch) {
+    const v = release.variants[key];
     const out = [];
     for (const f of v.files) {
-      const r = await fetchFn('fw/' + key + '/' + f.name, { cache: 'no-store' });
+      const r = await fetchFn('fw/' + release.version + '/' + key + '/' + f.name, { cache: 'no-store' });
       if (!r.ok) throw new Error(f.name + ': HTTP ' + r.status);
       const data = new Uint8Array(await r.arrayBuffer());
       if (data.length !== f.size) throw new Error(f.name + ': Größe ' + data.length + ' statt ' + f.size);
       if (await F.sha256hex(data) !== f.sha256) throw new Error(f.name + ': Prüfsumme falsch');
       if (f.name === 'firmware.bin') {
-        const marker = 'MCGW-FW-ID:' + v.project + ':' + manifest.version + ':MCGW-FW-END';
-        if (!new TextDecoder('latin1').decode(data).includes(marker)) throw new Error('firmware.bin trägt nicht das Merkmal ' + v.project + ' ' + manifest.version);
+        const marker = 'MCGW-FW-ID:' + v.project + ':' + release.version + ':MCGW-FW-END';
+        if (!new TextDecoder('latin1').decode(data).includes(marker)) throw new Error('firmware.bin trägt nicht das Merkmal ' + v.project + ' ' + release.version);
       }
       out.push({ data, address: f.address });
-      log('geprüft: ' + key + '/' + f.name + ' (' + data.length + ' Byte, SHA-256 ok) → 0x' + f.address.toString(16));
+      log('geprüft: ' + release.version + '/' + key + '/' + f.name + ' (' + data.length + ' Byte, SHA-256 ok) → 0x' + f.address.toString(16));
     }
     return out;
   },
@@ -201,7 +231,7 @@ $('btnCheck').onclick = async () => {
       return;
     }
     F.variant = v;
-    msg('checkMsg', 'ok', '<b>Erkannt: ' + esc(v.name) + '</b><br>Passende Firmware: <code>' + esc(v.project) + '</code> ' + esc(F.manifest.version));
+    msg('checkMsg', 'ok', '<b>Erkannt: ' + esc(v.name) + '</b><br>Passende Firmware: <code>' + esc(v.project) + '</code> (Version unten wählen)');
     log('Variante: ' + v.key + ' (' + v.project + ')');
     $('btnFlash').disabled = false;
     $('btnReset').hidden = false;
@@ -217,13 +247,13 @@ $('btnCheck').onclick = async () => {
 $('btnReset').onclick = async () => { await F.disconnect(); resetUi(); log('— zurückgesetzt'); };
 
 $('btnFlash').onclick = async () => {
-  const v = F.variant, L = F.loader;
-  if (!v || !L) return;
-  $('btnFlash').disabled = true; $('btnCheck').disabled = true; $('btnReset').hidden = true;
+  const v = F.variant, L = F.loader, rel = F.release;
+  if (!v || !L || !rel) return;
+  $('btnFlash').disabled = true; $('btnCheck').disabled = true; $('btnReset').hidden = true; $('fwSel').disabled = true;
   hideMsg('flashMsg');
   try {
-    log('— Dateien laden und prüfen …');
-    const files = await F.loadFiles(v.key, F.manifest);
+    log('— Version ' + rel.version + ' (' + F.statusText[rel.status] + '): Dateien laden und prüfen …');
+    const files = await F.loadFiles(v.key, rel);
     // Gegenprobe direkt vor dem Schreiben, gleiche Verbindung
     const again = await L.chip.getPsramCap(L);
     if (again !== v.psram_cap) throw new Error('Board hat sich geändert (PSRAM-Kennung ' + again + ').');
@@ -244,13 +274,14 @@ $('btnFlash').onclick = async () => {
     log('Geschrieben und per MD5 geprüft. Neustart …');
     try { await L.after('hard_reset'); } catch (e) {}
     await F.disconnect();
-    msg('flashMsg', 'ok', '<b>Fertig: ' + esc(v.project) + ' ' + esc(F.manifest.version) + ' ist installiert.</b><br>' +
+    msg('flashMsg', 'ok', '<b>Fertig: ' + esc(v.project) + ' ' + esc(rel.version) + ' ist installiert.</b><br>' +
       (erase ? 'Der erste Start dauert ca. 30 s (Dateisystem wird angelegt). Danach öffnet das Gateway den WLAN-Hotspot <b>installer</b> (Passwort <b>installer</b>), Einrichtung unter <b>http://192.168.4.1</b> (Login admin / password). <b>Wichtig:</b> Admin-Passwort ändern und die Regionen an deinen Standort anpassen, siehe <a href="https://github.com/peterhagelhof7-cmd/esp-meshcore-gateway/blob/main/docs/admin-guide.md#5-regionen-richtig-einrichten" target="_blank">Admin-Handbuch</a>.'
              : 'Das Gateway startet neu und behält WLAN und Einstellungen.') +
       '<br>Falls es nicht startet: einmal <b>RST</b> drücken.');
-    $('btnCheck').disabled = false;
+    $('btnCheck').disabled = false; $('fwSel').disabled = false;
   } catch (e) {
     const t = e.message || String(e);
+    $('fwSel').disabled = false;
     log('Fehler: ' + t);
     await F.disconnect();
     resetUi();
@@ -262,10 +293,15 @@ if (!('serial' in navigator)) {
   $('noSerial').className = 'msg on bad';
   $('btnCheck').disabled = true;
 }
+$('fwSel').onchange = () => { const r = F.selectRelease($('fwSel').value); log('Version gewählt: ' + r.version + ' (' + F.statusText[r.status] + ')'); };
+
 fetch('fw/manifest.json', { cache: 'no-store' }).then(r => r.json()).then(m => {
   F.manifest = m;
-  $('fwVer').textContent = m.version + ' (' + m.built + ')';
-  log('Firmware ' + m.version + ': ' + Object.values(m.variants).map(v => v.project).join(', '));
+  $('fwSel').innerHTML = m.releases.map(r => '<option value="' + esc(r.version) + '">' + esc(r.version) + ' – ' +
+    esc(F.statusText[r.status] || r.status) + (r.meshcore ? ' (MeshCore ' + esc(r.meshcore) + ')' : '') + '</option>').join('');
+  $('fwVer').textContent = m.releases.map(r => r.version + ' (' + (F.statusText[r.status] || r.status) + ')').join(' · ');
+  F.selectRelease(F.defaultRelease(m).version);
+  for (const r of m.releases) log('Firmware ' + r.version + ' [' + r.status + ']: ' + Object.values(r.variants).map(v => v.project).join(', '));
 }).catch(e => { $('fwVer').textContent = 'nicht verfügbar'; msg('checkMsg', 'bad', 'Firmware-Liste nicht ladbar: ' + esc(e.message)); });
 </script>
 </body>

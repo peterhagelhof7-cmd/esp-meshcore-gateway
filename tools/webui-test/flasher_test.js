@@ -18,6 +18,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 (async () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(docs, 'fw/manifest.json'), 'utf8'));
+  // E38: mehrere Versionen; vorausgewählt ist die neueste bewährte
+  const def = manifest.releases.find(r => r.status === 'stable') || manifest.releases[0];
+  const neu = manifest.releases.find(r => r.status === 'test');
   const browser = await puppeteer.launch({ executablePath: chrome, headless: true });
   const page = await browser.newPage();
   const errors = [];
@@ -27,7 +30,17 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const text = sel => page.$eval(sel, e => e.textContent);
   const waitFor = async (fn, ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await sleep(100); } return false; };
 
-  check('Seite: Version aus manifest.json', await waitFor(async () => (await text('#fwVer')).startsWith(manifest.version + ' (')), await text('#fwVer'));
+  check('Seite: Versionen aus manifest.json im Kopf', await waitFor(async () => (await text('#fwVer')).includes(def.version + ' (bewährt)')), await text('#fwVer'));
+  const opts = await page.$$eval('#fwSel option', os => os.map(o => o.value));
+  check('Auswahl: alle Versionen angeboten, neueste zuerst', JSON.stringify(opts) === JSON.stringify(manifest.releases.map(r => r.version)), opts.join(','));
+  check('Auswahl: bewährte Version vorausgewählt', (await page.$eval('#fwSel', e => e.value)) === def.version && (await page.evaluate(() => gwFlasher.release.version)) === def.version, await page.$eval('#fwSel', e => e.value));
+  check('Auswahl: Hinweis bewährt', (await text('#fwNote')).startsWith('Bewährte Version'), await text('#fwNote'));
+  if (neu) {
+    await page.select('#fwSel', neu.version);
+    check('Auswahl: neue Version -> Warnhinweis', (await page.$eval('#fwNote', e => e.className)).includes('warn') && (await text('#fwNote')).includes('noch nicht lange'), await text('#fwNote'));
+    check('Auswahl: Option nennt MeshCore-Version', (await page.$eval('#fwSel', e => e.options[e.selectedIndex].textContent)).includes('MeshCore ' + neu.meshcore), await page.$eval('#fwSel', e => e.options[e.selectedIndex].textContent));
+    await page.select('#fwSel', def.version);
+  }
   check('Seite: Installieren anfangs gesperrt', await page.$eval('#btnFlash', e => e.disabled));
 
   // --- Variantenwahl ---
@@ -43,23 +56,23 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check('Wahl: S3 mit 8 MB Flash -> abgelehnt', r.startsWith('ERR Flash 8MB'), r);
 
   // --- Datei-Prüfung ---
-  for (const key of ['v4', 'r8']) {
-    r = await page.evaluate(async k => { try { const f = await gwFlasher.loadFiles(k, gwFlasher.manifest); return f.map(x => x.address + ':' + x.data.length).join(','); } catch (e) { return 'ERR ' + e.message; } }, key);
-    const exp = manifest.variants[key].files.map(f => f.address + ':' + f.size).join(',');
-    check('Dateien ' + key + ': Größe, SHA-256, Merkmal ok', r === exp, r);
+  for (const rel of manifest.releases) for (const key of ['v4', 'r8']) {
+    r = await page.evaluate(async (k, ver) => { try { const f = await gwFlasher.loadFiles(k, gwFlasher.manifest.releases.find(x => x.version === ver)); return f.map(x => x.address + ':' + x.data.length).join(','); } catch (e) { return 'ERR ' + e.message; } }, key, rel.version);
+    const exp = rel.variants[key].files.map(f => f.address + ':' + f.size).join(',');
+    check('Dateien ' + rel.version + ' ' + key + ': Größe, SHA-256, Merkmal ok', r === exp, r);
   }
   r = await page.evaluate(async () => {
     const bad = async (u, o) => { const res = await fetch(u, o); const b = new Uint8Array(await res.arrayBuffer()); if (u.endsWith('firmware.bin')) b[5000] ^= 0xff;
       return { ok: true, status: 200, arrayBuffer: async () => b.buffer }; };
-    try { await gwFlasher.loadFiles('v4', gwFlasher.manifest, bad); return 'kein Fehler'; } catch (e) { return e.message; } });
+    try { await gwFlasher.loadFiles('v4', gwFlasher.release, bad); return 'kein Fehler'; } catch (e) { return e.message; } });
   check('Dateien: verändertes Byte -> Prüfsumme falsch', r === 'firmware.bin: Prüfsumme falsch', r);
   r = await page.evaluate(async () => {
     // R8-Firmware unter V4 einsortiert (Größe/Hash passend gemacht) -> Merkmal muss es fangen
-    const m = JSON.parse(JSON.stringify(gwFlasher.manifest));
+    const m = JSON.parse(JSON.stringify(gwFlasher.release));
     const r8 = m.variants.r8.files.find(f => f.name === 'firmware.bin');
     const v4 = m.variants.v4.files.find(f => f.name === 'firmware.bin');
     v4.size = r8.size; v4.sha256 = r8.sha256;
-    const swap = (u, o) => fetch(u.replace('fw/v4/firmware.bin', 'fw/r8/firmware.bin'), o);
+    const swap = (u, o) => fetch(u.replace('/v4/firmware.bin', '/r8/firmware.bin'), o);
     try { await gwFlasher.loadFiles('v4', m, swap); return 'kein Fehler'; } catch (e) { return e.message; } });
   check('Dateien: R8-Firmware als V4 -> Merkmal fehlt', r.includes('trägt nicht das Merkmal MESHCORE-GW-HELTEC-V4'), r);
 
@@ -78,7 +91,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       },
       detectFlashSize: async () => b.flashSize,
       writeFlash: async (o) => {
-        __w.calls.push({ files: o.fileArray.map(f => '0x' + f.address.toString(16) + ':' + f.data.length), eraseAll: o.eraseAll, mode: o.flashMode, freq: o.flashFreq, size: o.flashSize, compress: o.compress });
+        __w.calls.push({ files: o.fileArray.map(f => '0x' + f.address.toString(16) + ':' + f.data.length), eraseAll: o.eraseAll, mode: o.flashMode, freq: o.flashFreq, size: o.flashSize, compress: o.compress, selDis: document.getElementById('fwSel').disabled });
         o.fileArray.forEach((f, i) => { __w.md5.push(o.calculateMD5Hash(f.data)); o.reportProgress(i, 1, 1); });
       },
       after: async () => { __w.after++; },
@@ -93,18 +106,18 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.click('#btnCheck');
   await waitFor(async () => (await state()).check.includes('on'));
   let s = await state();
-  check('V4: erkannt, passende Firmware angezeigt', s.check.includes('ok') && s.check.includes('Erkannt: Heltec WiFi LoRa 32 V4 (ESP32-S3R2') && s.check.includes('MESHCORE-GW-HELTEC-V4 ' + manifest.version), s.check);
+  check('V4: erkannt, passende Firmware angezeigt', s.check.includes('ok') && s.check.includes('Erkannt: Heltec WiFi LoRa 32 V4 (ESP32-S3R2') && s.check.includes('MESHCORE-GW-HELTEC-V4'), s.check);
   check('V4: Chipdaten angezeigt', (await text('#iFeat')).includes('PSRAM 2MB') && (await text('#iFlash')) === '16MB');
   check('V4: Installieren freigegeben', !s.btn);
   await page.click('#btnFlash');
   await waitFor(async () => (await state()).flash.includes(' ok '));
   s = await state();
-  check('V4: Erfolgsmeldung', s.flash.startsWith('msg on ok') && s.flash.includes('MESHCORE-GW-HELTEC-V4 ' + manifest.version + ' ist installiert'), s.flash);
-  const exp = f => manifest.variants[f].files.map(x => '0x' + x.address.toString(16) + ':' + x.size);
+  check('V4: Erfolgsmeldung', s.flash.startsWith('msg on ok') && s.flash.includes('MESHCORE-GW-HELTEC-V4 ' + def.version + ' ist installiert'), s.flash);
+  const exp = (f, rel = def) => rel.variants[f].files.map(x => '0x' + x.address.toString(16) + ':' + x.size);
   check('V4: writeFlash mit 4 Dateien an 0x0/0x8000/0xe000/0x10000', s.w.calls.length === 1 && JSON.stringify(s.w.calls[0].files) === JSON.stringify(exp('v4')), JSON.stringify(s.w.calls));
   check('V4: Parameter wie PlatformIO (dio, 80m, 16MB, komprimiert, löschen)', s.w.calls[0].mode === 'dio' && s.w.calls[0].freq === '80m' && s.w.calls[0].size === '16MB' && s.w.calls[0].compress === true && s.w.calls[0].eraseAll === true, JSON.stringify(s.w.calls[0]));
-  const md5 = f => crypto.createHash('md5').update(fs.readFileSync(path.join(docs, 'fw', f))).digest('hex');
-  check('V4: MD5 für die Nachprüfung korrekt', JSON.stringify(s.w.md5) === JSON.stringify(manifest.variants.v4.files.map(f => md5('v4/' + f.name))), s.w.md5.join(','));
+  const md5 = f => crypto.createHash('md5').update(fs.readFileSync(path.join(docs, 'fw', def.version, f))).digest('hex');
+  check('V4: MD5 für die Nachprüfung korrekt', JSON.stringify(s.w.md5) === JSON.stringify(def.variants.v4.files.map(f => md5('v4/' + f.name))), s.w.md5.join(','));
   check('V4: Neustart + Trennen, Fortschritt 100 %', s.w.after === 1 && s.w.disc >= 1 && s.prog === 100, JSON.stringify({ a: s.w.after, d: s.w.disc, p: s.prog }));
 
   // 2) V4-R8 ohne Löschen
@@ -112,10 +125,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.click('#btnCheck');
   await waitFor(async () => (await state()).check.includes('Erkannt'));
   await page.$eval('#optErase', e => { e.checked = false; });
+  const rel2 = neu || def;   // R8 mit der neuen Version, falls vorhanden
+  await page.select('#fwSel', rel2.version);
   await page.click('#btnFlash');
   await waitFor(async () => (await state()).flash.includes(' ok '));
   s = await state();
-  check('R8: erkannt und R8-Firmware geschrieben', s.check.includes('V4-R8') && s.w.calls.length === 1 && JSON.stringify(s.w.calls[0].files) === JSON.stringify(exp('r8')), JSON.stringify(s.w.calls));
+  check('R8: erkannt und R8-Firmware der gewählten Version ' + rel2.version + ' geschrieben', s.check.includes('V4-R8') && s.w.calls.length === 1 && JSON.stringify(s.w.calls[0].files) === JSON.stringify(exp('r8', rel2)) && s.flash.includes('HELTEC-V4-R8 ' + rel2.version + ' ist installiert'), JSON.stringify(s.w.calls) + ' | ' + s.flash);
+  check('Auswahl: während des Schreibens gesperrt, danach frei', s.w.calls[0].selDis === true && !(await page.$eval('#fwSel', e => e.disabled)));
+  await page.select('#fwSel', def.version);
   check('R8: ohne Löschen -> Einstellungen bleiben (Meldung)', s.w.calls[0].eraseAll === false && s.flash.includes('behält WLAN und Einstellungen'), s.flash);
   await page.$eval('#optErase', e => { e.checked = true; });
 

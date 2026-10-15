@@ -678,3 +678,23 @@ bleibt „Alles wie empfohlen“). Live-Check prüft zusätzlich: Gerät hat Reg
 **HW 2026-10-15 (OTA auf .151, app1, Image gültig nach 60 s):** alle 19 Profilwerte vor/nach identisch
 (inkl. `radio.fem.rxgain` = off, Migration ok), `ver` = v1.18.0, `power` neu verfügbar, Live-Check bestanden,
 Nachbarsuche nach Start findet A1B2C3D4 (SNR 12 dB), Kanalnachricht auf Public gesendet.
+
+## E38 – Web-Flasher mit Versionsauswahl (2026-10-15, User: „lass die vorherige im Webflasher zur Auswahl, bei der wissen wir, dass sie läuft, die andere ist noch keine 24 h gelaufen“)
+
+- `docs/fw/manifest.json` führt jetzt mehrere Versionen (`releases`, neueste zuerst) mit `status` `stable`
+  (bewährt) oder `test` (neu, in Erprobung) und der zugehörigen MeshCore-Version. Dateien liegen unter
+  `docs/fw/<Version>/<v4|r8>/`.
+- Die Flasher-Seite bietet die Versionen in einer Auswahl an. **Vorausgewählt ist die neueste bewährte**, nicht die
+  neueste: wer nichts ändert, bekommt die Version, die schon im Echtbetrieb lief. Eine Version in Erprobung zeigt
+  einen Warnhinweis. Während des Schreibens ist die Auswahl gesperrt. Merkmal-Prüfung gegen die gewählte Version.
+- `tools\flasher-update.ps1`: neue Version standardmäßig als `test`, `-Promote <V>` setzt sie auf bewährt,
+  `-Remove <V>` nimmt eine Version samt Dateien heraus. Altes Manifest (eine Version) wird beim ersten Lauf
+  automatisch umgestellt (0.7.6 → `fw/0.7.6/`, Status `stable`, Dateien unverändert, Git erkennt reine Umbenennung).
+- Stand: 0.7.6 bewährt (vorausgewählt), 0.8.0 in Erprobung. Nach ≥ 24 h fehlerfreiem Lauf auf .151:
+  `-Promote 0.8.0`, Download-Links im Admin-Handbuch anpassen, ggf. `-Remove 0.7.6`.
+- Die alten Download-Links `fw/v4/firmware.bin` und `fw/r8/firmware.bin` gibt es nicht mehr; das Admin-Handbuch
+  verlinkt jetzt versioniert.
+
+**Verifikation:** `flasher_test.js` 38/38 lokal (neu: Versionen im Kopf, Auswahl vollständig, bewährte vorausgewählt,
+Warnhinweis, MeshCore-Version in der Option, Dateien beider Versionen × beider Boards, R8-Ablauf mit 0.8.0, Auswahl
+während des Schreibens gesperrt).

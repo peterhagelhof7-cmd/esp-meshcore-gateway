@@ -1,6 +1,6 @@
 # Admin-Handbuch: MeshCore-Gateway
 
-Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.7.6, MeshCore 1.17.1.
+Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.8.0, MeshCore 1.18.0.
 
 **Inhalt**
 
@@ -18,7 +18,7 @@ Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.7.6, MeshC
 
 ## 1. Was das Gateway ist
 
-Ein normaler **MeshCore-Repeater** (Firmware 1.17.1, unverändert) auf einem Heltec WiFi LoRa 32 V4, zusätzlich
+Ein normaler **MeshCore-Repeater** (Firmware 1.18.0, unverändert) auf einem Heltec WiFi LoRa 32 V4, zusätzlich
 mit WLAN:
 
 - **Weboberfläche** für alle Repeater-Einstellungen, Regionen, Admin-Passwort, Backup und Firmware-Update
@@ -68,10 +68,13 @@ nicht auf USB zugreifen. Treiber sind nicht nötig, das V4 hat USB direkt im Chi
 
    Bis hierhin wird **nichts** geschrieben. Ein laufendes Gateway startet beim Prüfen einmal neu, die Einstellungen
    bleiben.
-4. **Flash vorher komplett löschen**: bei der Erstinstallation oder wenn vorher eine andere Firmware lief
+4. **Version** wählen. Vorausgewählt ist die neueste **bewährte** Version, die schon länger im Echtbetrieb läuft.
+   Eine Version **„neu, in Erprobung“** ist getestet, läuft aber noch nicht lange auf echten Gateways; für den
+   Dauerbetrieb die bewährte nehmen.
+5. **Flash vorher komplett löschen**: bei der Erstinstallation oder wenn vorher eine andere Firmware lief
    **angehakt lassen**. Das löscht WLAN, Kanäle, Einstellungen und die **Knoten-Identität** (das Gateway bekommt
    einen neuen Schlüssel und erscheint im Mesh als neuer Knoten).
-5. **„Installieren“**: Die Dateien werden per Prüfsumme und Board-Merkmal kontrolliert, geschrieben und nach dem
+6. **„Installieren“**: Die Dateien werden per Prüfsumme und Board-Merkmal kontrolliert, geschrieben und nach dem
    Schreiben verglichen. Dauer 1–2 Minuten, USB nicht trennen.
 6. Nach „Fertig“ startet das Gateway. Der erste Start dauert ca. 30 s (Dateisystem wird angelegt).
 
@@ -219,9 +222,13 @@ und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.
 
 - **Laufendes Gateway: System → Firmware-Update**, die `firmware.bin` für dein Board hochladen und
   „Hochladen & installieren“. Alle Einstellungen bleiben. Aktuelle Dateien:
-  [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/v4/firmware.bin) ·
-  [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/r8/firmware.bin)
-  (welches Board du hast, zeigt der Web-Flasher bei „Verbinden & prüfen“).
+  - bewährt 0.7.6: [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.7.6/v4/firmware.bin) ·
+    [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.7.6/r8/firmware.bin)
+  - neu, in Erprobung 0.8.0 (MeshCore 1.18.0):
+    [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.8.0/v4/firmware.bin) ·
+    [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.8.0/r8/firmware.bin)
+
+  Welches Board du hast, zeigt der Web-Flasher bei „Verbinden & prüfen“.
   - Falsches Board und ältere Versionen werden abgelehnt („Downgrade erzwingen“ nur, wenn gewollt).
   - **Rollback:** Startet die neue Version nicht sauber (Absturz in der ersten Minute), kehrt das Gateway
     automatisch zur vorherigen zurück. Im Ereignis-Log steht dann eine `ROLLBACK`-Zeile.

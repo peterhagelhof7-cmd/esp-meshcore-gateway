@@ -24,7 +24,9 @@ PlatformIO, Envs `gateway_heltec_v4` und `gateway_heltec_v4_r8`. MeshCore liegt 
 
 - Host-Tests: `tools\host-test.ps1 -Build`
 - Web-UI-Test gegen Mock: `tools/webui-test` (`README.md` dort)
-- Flasher-Dateien aktualisieren: `tools\flasher-update.ps1 -Build`, danach `docs/fw/` committen
+- Flasher-Dateien aktualisieren: `tools\flasher-update.ps1 -Build` (neue Version als „in Erprobung“, ältere bleiben
+  wählbar), nach Bewährung `-Promote <Version>`, alte mit `-Remove <Version>`; danach `docs/fw/` committen
+  und die Download-Links in `docs/admin-guide.md` Abschnitt 7 anpassen
 
 Planung und Entscheidungen: [`docs/planung.md`](docs/planung.md), [`docs/entscheidungen.md`](docs/entscheidungen.md).
 
