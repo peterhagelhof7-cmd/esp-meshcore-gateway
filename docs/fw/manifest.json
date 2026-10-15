@@ -1,69 +1,145 @@
 {
-    "version":  "0.7.6",
-    "built":  "2026-10-14",
     "flash_size":  "16MB",
-    "variants":  {
-                     "v4":  {
-                                "name":  "Heltec WiFi LoRa 32 V4 (ESP32-S3R2, 2 MB PSRAM)",
-                                "project":  "MESHCORE-GW-HELTEC-V4",
-                                "psram_cap":  2,
-                                "files":  [
-                                              {
-                                                  "name":  "bootloader.bin",
-                                                  "address":  0,
-                                                  "size":  15104,
-                                                  "sha256":  "2a71d69b471e20c2bac7fb469f3c6a807b3ebee780e348e5889db0da849ca363"
-                                              },
-                                              {
-                                                  "name":  "partitions.bin",
-                                                  "address":  32768,
-                                                  "size":  3072,
-                                                  "sha256":  "bd0f7954aca2ef7d925ee21aaa1f3dc8822d1d6ce5cbbd26a135e5886bfff6ce"
-                                              },
-                                              {
-                                                  "name":  "boot_app0.bin",
-                                                  "address":  57344,
-                                                  "size":  8192,
-                                                  "sha256":  "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0"
-                                              },
-                                              {
-                                                  "name":  "firmware.bin",
-                                                  "address":  65536,
-                                                  "size":  1339008,
-                                                  "sha256":  "c2ee66af8620dc33ae2e651da8c14704f60330899b9f3c5debb45f56ebf6e591"
-                                              }
-                                          ]
-                            },
-                     "r8":  {
-                                "name":  "Heltec WiFi LoRa 32 V4-R8 (ESP32-S3R8, 8 MB PSRAM)",
-                                "project":  "MESHCORE-GW-HELTEC-V4-R8",
-                                "psram_cap":  1,
-                                "files":  [
-                                              {
-                                                  "name":  "bootloader.bin",
-                                                  "address":  0,
-                                                  "size":  15104,
-                                                  "sha256":  "2a71d69b471e20c2bac7fb469f3c6a807b3ebee780e348e5889db0da849ca363"
-                                              },
-                                              {
-                                                  "name":  "partitions.bin",
-                                                  "address":  32768,
-                                                  "size":  3072,
-                                                  "sha256":  "bd0f7954aca2ef7d925ee21aaa1f3dc8822d1d6ce5cbbd26a135e5886bfff6ce"
-                                              },
-                                              {
-                                                  "name":  "boot_app0.bin",
-                                                  "address":  57344,
-                                                  "size":  8192,
-                                                  "sha256":  "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0"
-                                              },
-                                              {
-                                                  "name":  "firmware.bin",
-                                                  "address":  65536,
-                                                  "size":  1342432,
-                                                  "sha256":  "635b18d435cb6586b943881ebeb651781c3bf3597fe44820aaa5143bd01771d0"
-                                              }
-                                          ]
-                            }
-                 }
+    "releases":  [
+                     {
+                         "version":  "0.8.0",
+                         "built":  "2026-10-15",
+                         "status":  "test",
+                         "meshcore":  "1.18.0",
+                         "variants":  {
+                                          "v4":  {
+                                                     "name":  "Heltec WiFi LoRa 32 V4 (ESP32-S3R2, 2 MB PSRAM)",
+                                                     "project":  "MESHCORE-GW-HELTEC-V4",
+                                                     "psram_cap":  2,
+                                                     "files":  [
+                                                                   {
+                                                                       "name":  "bootloader.bin",
+                                                                       "address":  0,
+                                                                       "size":  15104,
+                                                                       "sha256":  "2a71d69b471e20c2bac7fb469f3c6a807b3ebee780e348e5889db0da849ca363"
+                                                                   },
+                                                                   {
+                                                                       "name":  "partitions.bin",
+                                                                       "address":  32768,
+                                                                       "size":  3072,
+                                                                       "sha256":  "bd0f7954aca2ef7d925ee21aaa1f3dc8822d1d6ce5cbbd26a135e5886bfff6ce"
+                                                                   },
+                                                                   {
+                                                                       "name":  "boot_app0.bin",
+                                                                       "address":  57344,
+                                                                       "size":  8192,
+                                                                       "sha256":  "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0"
+                                                                   },
+                                                                   {
+                                                                       "name":  "firmware.bin",
+                                                                       "address":  65536,
+                                                                       "size":  1342992,
+                                                                       "sha256":  "2cd66cd507e0cca5728807d02564dc00317ec74526bb89d5efe0861cc0d98ff7"
+                                                                   }
+                                                               ]
+                                                 },
+                                          "r8":  {
+                                                     "name":  "Heltec WiFi LoRa 32 V4-R8 (ESP32-S3R8, 8 MB PSRAM)",
+                                                     "project":  "MESHCORE-GW-HELTEC-V4-R8",
+                                                     "psram_cap":  1,
+                                                     "files":  [
+                                                                   {
+                                                                       "name":  "bootloader.bin",
+                                                                       "address":  0,
+                                                                       "size":  15104,
+                                                                       "sha256":  "2a71d69b471e20c2bac7fb469f3c6a807b3ebee780e348e5889db0da849ca363"
+                                                                   },
+                                                                   {
+                                                                       "name":  "partitions.bin",
+                                                                       "address":  32768,
+                                                                       "size":  3072,
+                                                                       "sha256":  "bd0f7954aca2ef7d925ee21aaa1f3dc8822d1d6ce5cbbd26a135e5886bfff6ce"
+                                                                   },
+                                                                   {
+                                                                       "name":  "boot_app0.bin",
+                                                                       "address":  57344,
+                                                                       "size":  8192,
+                                                                       "sha256":  "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0"
+                                                                   },
+                                                                   {
+                                                                       "name":  "firmware.bin",
+                                                                       "address":  65536,
+                                                                       "size":  1346560,
+                                                                       "sha256":  "d0516681817eb3cf6aa66e29f3c3afddd24314e06df6e6972b6b40b4cdfb5a7f"
+                                                                   }
+                                                               ]
+                                                 }
+                                      }
+                     },
+                     {
+                         "version":  "0.7.6",
+                         "built":  "2026-10-14",
+                         "status":  "stable",
+                         "meshcore":  "1.17.1",
+                         "variants":  {
+                                          "v4":  {
+                                                     "name":  "Heltec WiFi LoRa 32 V4 (ESP32-S3R2, 2 MB PSRAM)",
+                                                     "project":  "MESHCORE-GW-HELTEC-V4",
+                                                     "psram_cap":  2,
+                                                     "files":  [
+                                                                   {
+                                                                       "name":  "bootloader.bin",
+                                                                       "address":  0,
+                                                                       "size":  15104,
+                                                                       "sha256":  "2a71d69b471e20c2bac7fb469f3c6a807b3ebee780e348e5889db0da849ca363"
+                                                                   },
+                                                                   {
+                                                                       "name":  "partitions.bin",
+                                                                       "address":  32768,
+                                                                       "size":  3072,
+                                                                       "sha256":  "bd0f7954aca2ef7d925ee21aaa1f3dc8822d1d6ce5cbbd26a135e5886bfff6ce"
+                                                                   },
+                                                                   {
+                                                                       "name":  "boot_app0.bin",
+                                                                       "address":  57344,
+                                                                       "size":  8192,
+                                                                       "sha256":  "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0"
+                                                                   },
+                                                                   {
+                                                                       "name":  "firmware.bin",
+                                                                       "address":  65536,
+                                                                       "size":  1339008,
+                                                                       "sha256":  "c2ee66af8620dc33ae2e651da8c14704f60330899b9f3c5debb45f56ebf6e591"
+                                                                   }
+                                                               ]
+                                                 },
+                                          "r8":  {
+                                                     "name":  "Heltec WiFi LoRa 32 V4-R8 (ESP32-S3R8, 8 MB PSRAM)",
+                                                     "project":  "MESHCORE-GW-HELTEC-V4-R8",
+                                                     "psram_cap":  1,
+                                                     "files":  [
+                                                                   {
+                                                                       "name":  "bootloader.bin",
+                                                                       "address":  0,
+                                                                       "size":  15104,
+                                                                       "sha256":  "2a71d69b471e20c2bac7fb469f3c6a807b3ebee780e348e5889db0da849ca363"
+                                                                   },
+                                                                   {
+                                                                       "name":  "partitions.bin",
+                                                                       "address":  32768,
+                                                                       "size":  3072,
+                                                                       "sha256":  "bd0f7954aca2ef7d925ee21aaa1f3dc8822d1d6ce5cbbd26a135e5886bfff6ce"
+                                                                   },
+                                                                   {
+                                                                       "name":  "boot_app0.bin",
+                                                                       "address":  57344,
+                                                                       "size":  8192,
+                                                                       "sha256":  "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0"
+                                                                   },
+                                                                   {
+                                                                       "name":  "firmware.bin",
+                                                                       "address":  65536,
+                                                                       "size":  1342432,
+                                                                       "sha256":  "635b18d435cb6586b943881ebeb651781c3bf3597fe44820aaa5143bd01771d0"
+                                                                   }
+                                                               ]
+                                                 }
+                                      }
+                     }
+                 ]
 }
