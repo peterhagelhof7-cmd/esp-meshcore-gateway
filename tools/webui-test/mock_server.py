@@ -344,17 +344,44 @@ class FakeSm:
 
     @staticmethod
     def parse_ack(body):
-        m = re.fullmatch(r'\s*(?:@\[[^\]]*\]\s*)?ack[\s#]*(\d{1,2})?[\s.!]*', body, re.I)
+        # Rückgabe (nr, ziel) oder None; nr 0 = alle, ziel '' = an alle (wie Tracker::parseAck)
+        m = re.fullmatch(r'\s*(?:@\[([^\]]*)\]\s*)?ack[\s#]*(\d{1,2})?[\s.!]*', body, re.I)
         if not m: return None
-        n = int(m.group(1)) if m.group(1) else 0
-        return n if (m.group(1) is None or 1 <= n <= 99) else None
+        n = int(m.group(2)) if m.group(2) else 0
+        return (n, m.group(1) or '') if (m.group(2) is None or 1 <= n <= 99) else None
+
+    # --- Zabbix-Kennung (E41), wie src/ZbxFormat.cpp / SmPoller::emitEvent ---
+    @staticmethod
+    def src(kind, key):
+        crc = 0xFFFF
+        for b in key.encode():
+            crc ^= b << 8
+            for _ in range(8): crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+        return '%s%04x' % (kind, crc)
+
+    @staticmethod
+    def marker(src, ev, val, ack):
+        v = '' if val is None else ('%.2f' % val).rstrip('0').rstrip('.')
+        return ' #Z1;%s;%s;%s;%s' % (src, ev, v, ack or '')
+
+    def send_ev(self, channel, text, src, ev, val=None, ack=0, count=True):
+        st = self.cfg['settings']; mode = st.get('zbxMode', 0)
+        if not src or not mode: return self.emit(channel, text, count)
+        room = 160 - len(cli.p['name'].encode()) - 2
+        mk = self.marker(src, ev, val, ack)
+        t = text.encode()[:max(0, room - len(mk))].decode('utf-8', 'ignore')
+        if mode == 1: return self.emit(channel, t + mk, count)
+        self.emit(channel, text, count)
+        self.emit(st.get('zbxChannel', ''), t + mk, count)
 
     def on_channel_text(self, channel, text):
         sender, _, body = text.partition(': ')
         if not _: sender, body = '?', text
-        want = self.parse_ack(body)
-        if want is None: return
-        hit = [a for a in self.acks if a['channel'] == channel and (not want or a['id'] == want)]
+        p = self.parse_ack(body)
+        if p is None: return
+        want, target = p
+        if target and target.lower() != cli.p['name'].lower(): return   # an ein anderes Gateway
+        hit = [a for a in self.acks if channel in (a['channel'], a.get('channel2')) and (not want or a['id'] == want)]
         if not hit:
             push('smlog', 'S', '%s: "%s" von %s - nichts Offenes dazu' % (channel, body, sender)); return
         self.acks = [a for a in self.acks if a not in hit]
@@ -373,10 +400,13 @@ class FakeSm:
     def repeat_all(self):
         for a in self.acks:
             if a['repeats'] >= 3: continue
-            self.emit(a['channel'], '[ACK %d] WDH %d/3%s: %s' % (a['id'], a['repeats'] + 1, ' (inzw. OK)' if a['cleared'] else '', a['text']))
+            self.send_ev(a['channel'], '[ACK %d] WDH %d/3%s: %s' % (a['id'], a['repeats'] + 1, ' (inzw. OK)' if a['cleared'] else '', a['text']),
+                         a.get('zsrc'), 'W', a.get('zval'), a['id'])
             a['repeats'] += 1
 
     def save(self, j):
+        st = j.get('settings', {})
+        if st.get('zbxMode') == 2 and not st.get('zbxChannel'): return 'Zabbix-Kanal wählen (oder Kennung im Alarmtext)'
         devs = j.get('devices', [])
         if len(devs) > 8: return 'Maximal 8 Geräte'
         for i, d in enumerate(devs):
@@ -484,10 +514,16 @@ class FakeSm:
                 rs['state'] = 'alert'; rs['lastEvent'] = 'ALARM'
                 tpl = r.get('text') or self.cfg['settings'].get('alertText') or '{state} {device}: {metric} {value}{unit} ({op}{threshold}{unit})'
                 txt = self.render(tpl, d['name'], r['path'], v, r['op'], r['threshold'], 'ALARM')
+                st = self.cfg['settings']
+                zsrc = self.src('R', '%s|%s|%s' % (d['name'], r['path'], '<' if r['op'] else '>'))
+                ack = 0
                 if r.get('ackRequired'):
-                    ch = r['channel'] or self.cfg['settings']['defaultChannel']
-                    txt = '[ACK %d] %s' % (self.open_ack('rule', ri, ch, txt), txt)
-                self.emit(r['channel'], txt)
+                    ch = r['channel'] or st['defaultChannel']
+                    ack = self.open_ack('rule', ri, ch, txt)
+                    a = self.acks[-1]
+                    a.update(zsrc=zsrc if st.get('zbxMode') else '', zval=v, channel2=st.get('zbxChannel', '') if st.get('zbxMode') == 2 else '')
+                    txt = '[ACK %d] %s' % (ack, txt)
+                self.send_ev(r['channel'] or st['defaultChannel'], txt, zsrc, 'A', v, ack)
 
     def test(self, i):
         if not (0 <= i < len(self.cfg['rules'])): return 'Regel unbekannt'
@@ -645,6 +681,88 @@ IP_RE = re.compile(r'^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3
 ipcheck = {'state': 'idle', 'detail': ''}
 
 
+class FakeZbx:
+    """Zabbix-Weiterleitung (E41) wie src/ZbxForwarder.cpp, Zabbix selbst simuliert:
+    Server 'offline' = nicht erreichbar, Host mit 'unbekannt' = abgelehnt, sonst angenommen."""
+    MARK = re.compile(r' #Z1;([^;]{1,7});([AEWOFNHT]);(-?[0-9.]*);(\d{0,2})\s*$')
+
+    def __init__(self):
+        self.cfg = {'enabled': False, 'server': '', 'port': 10051, 'rxHost': '', 'hostPrefix': '', 'channels': '',
+                    'autoAck': True, 'forwardUnmarked': False, 'heartbeatMin': 5}
+        self.st = {'received': 0, 'forwarded': 0, 'rejected': 0, 'errors': 0, 'acks': 0, 'dropped': 0, 'pending': 0,
+                   'lastOkAgoS': None, 'heartbeatAgoS': None, 'lastError': '', 'lastTest': ''}
+        self.pend = []
+
+    def send(self, host, key, value):
+        if self.cfg['server'] in ('', 'offline'): return -1, 'keine Verbindung zu %s:%d' % (self.cfg['server'], self.cfg['port'])
+        if 'unbekannt' in host: return 0, 'abgelehnt (Host "%s" / Item %s fehlt, nicht Trapper oder Allowed hosts?)' % (host, key)
+        return 1, ''
+
+    def on_text(self, ch_idx, channel, text):
+        c = self.cfg
+        if not c['enabled']: return
+        allowed = [x.strip() for x in c['channels'].split(',') if x.strip()]
+        if allowed and channel not in allowed: return
+        sender, _, body = text.partition(': ')
+        if not _: return
+        m = self.MARK.search(body)
+        if not m and not c['forwardUnmarked']: return
+        self.st['received'] += 1
+        if m:
+            ev = {'src': m.group(1), 'ev': m.group(2), 'state': {'A': 'ALARM', 'E': 'ALARM', 'W': 'ALARM', 'F': 'ALARM', 'O': 'OK', 'N': 'OK'}.get(m.group(2), 'INFO')}
+            if m.group(3): ev['value'] = float(m.group(3))
+            if m.group(4): ev['ack'] = int(m.group(4))
+            ev.update(text=body[:m.start()], gw=sender, channel=channel, rx=cli.p['name'])
+            item = {'host': c['hostPrefix'] + sanitize_host(sender), 'key': 'meshcore.event', 'value': json.dumps(ev, ensure_ascii=False),
+                    'ack': int(m.group(4)) if (m.group(4) and c['autoAck']) else 0, 'sender': sender, 'ch': ch_idx, 'chname': channel}
+        else:
+            item = {'host': c['rxHost'] or eff_host(), 'key': 'meshcore.rx.unparsed', 'value': json.dumps({'text': body, 'gw': sender}),
+                    'ack': 0, 'sender': sender, 'ch': ch_idx, 'chname': channel}
+        self.pend.append(item)
+        self.process()
+
+    def process(self):
+        keep = []
+        for it in self.pend:
+            r, err = self.send(it['host'], it['key'], it['value'])
+            if r == 1:
+                self.st['forwarded'] += 1; self.st['lastOk'] = time.time(); self.st['lastError'] = ''
+                push('smlog', 'A', 'Zabbix <- %s %s: %s' % (it['host'], it['key'], it['value'][:80]))
+                if it['ack']:
+                    a = '@[%s] ACK %d' % (it['sender'], it['ack'])
+                    push('messages', 'S', '\t'.join([str(it['ch']), it['chname'], '', '0', cli.p['name'] + ': ' + a]))
+                    push('smlog', 'A', '%s -> %s' % (it['chname'], a))
+                    self.st['acks'] += 1
+            elif r == 0:
+                self.st['rejected'] += 1; self.st['lastError'] = err; push('smlog', 'X', 'Zabbix: ' + err)
+            else:
+                self.st['errors'] += 1; self.st['lastError'] = err; push('smlog', 'X', 'Zabbix: ' + err); keep.append(it)
+        self.pend = keep
+
+    def save(self, j):
+        if not re.fullmatch(r'[A-Za-z0-9._-]*', j.get('server', '')): return 'Zabbix-Server: IP oder Hostname'
+        if j.get('enabled') and not j.get('server'): return 'Zabbix-Server fehlt'
+        self.cfg.update(j)
+        self.process()   # nach Korrektur: wartende gleich senden
+        return None
+
+    def test(self):
+        r, err = self.send(self.cfg['rxHost'] or eff_host(), 'meshcore.rx.heartbeat', '123')
+        self.st['lastTest'] = ('OK: %s / meshcore.rx.heartbeat angenommen' % (self.cfg['rxHost'] or eff_host())) if r == 1 else 'Fehler: ' + err
+        if r == 1: self.st['hb'] = time.time()
+
+    def json(self):
+        s = dict(self.st)
+        s['pending'] = len(self.pend)
+        s['lastOkAgoS'] = int(time.time() - s.pop('lastOk')) if 'lastOk' in s else None
+        s['heartbeatAgoS'] = int(time.time() - s.pop('hb')) if 'hb' in s else None
+        s['rxHost'] = self.cfg['rxHost'] or eff_host()
+        return {'config': dict(self.cfg), 'status': s}
+
+
+zbxm = FakeZbx()
+
+
 def mock_probe(ip):
     # wie net_check::probe gegen das Mock-Netz 192.168.1.0/24 (Gateway .50, belegt: .1 Router und .99)
     if ip == '192.168.1.50': return 'own', 'aktuelle Adresse des Gateways'
@@ -725,12 +843,15 @@ class H(BaseHTTPRequestHandler):
         if u.path == '/api/wifi/checkip':
             with lock:
                 return self.send_json(dict(ipcheck))
+        if u.path == '/api/zbx':
+            with lock:
+                return self.send_json(zbxm.json())
         if u.path == '/api/backup/extra':
             secrets = q.get('secrets', ['0'])[0] == '1'
             with lock:
                 sm = json.loads(json.dumps(smm.cfg)) if secrets else smm.json()['config']
                 out = {'hostname': gwcfg['hostname'], 'wifi': dict({'ssid': gwcfg['ssid']}, **{k: gwcfg[k] for k in ('ip', 'mask', 'gw', 'dns1', 'dns2')}),
-                       'acl': [{'perm': v, 'pubkey': k} for k, v in cli.acl.items()], 'sensormeter': sm}
+                       'acl': [{'perm': v, 'pubkey': k} for k, v in cli.acl.items()], 'sensormeter': sm, 'zabbix': dict(zbxm.cfg)}
                 if secrets:
                     out['wifi']['pass'] = gwcfg['pass']; out['adminPassword'] = cli.p['password']
             return self.send_json(out)
@@ -815,6 +936,19 @@ class H(BaseHTTPRequestHandler):
                 if ch < 0: return self.send_json({'error': 'Kanal unbekannt'}, 404)
                 push('messages', 'M', '\t'.join([str(ch), f('channel'), '7.0', '1', f('text')]))
                 smm.on_channel_text(f('channel'), f('text'))
+                zbxm.on_text(ch, f('channel'), f('text'))
+            return self.send_json({'ok': True})
+        if u.path == '/api/zbx/save':
+            try:
+                j = json.loads(form.get('json', [''])[0])
+            except Exception as e:
+                return self.send_json({'error': 'JSON: ' + str(e)}, 400)
+            with lock:
+                err = zbxm.save(j)
+            return self.send_json({'error': err}, 400) if err else self.send_json({'ok': True})
+        if u.path == '/api/zbx/test':
+            with lock:
+                zbxm.test()
             return self.send_json({'ok': True})
         if u.path == '/api/mock/ackrepeat':   # nur Mock: alle offenen um eine Wiederholung weiter
             with lock:

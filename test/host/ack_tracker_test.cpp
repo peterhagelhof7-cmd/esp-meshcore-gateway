@@ -85,16 +85,35 @@ int main() {
     uint8_t b = t.open(Kind::PING, 1, "haus-alarm", "B", 0);
     uint8_t c = t.open(Kind::RULE, 3, "anderer", "C", 0);
     uint8_t ids[8];
-    check("ACK in fremdem Text -> -1", t.acknowledge("haus-alarm", "hallo", ids, 8) == -1);
-    check("ACK mit falscher Nummer -> 0", t.acknowledge("haus-alarm", "ACK 99", ids, 8) == 0);
+    check("ACK in fremdem Text -> -1", t.acknowledge("haus-alarm", "hallo", "GW", ids, 8) == -1);
+    check("ACK mit falscher Nummer -> 0", t.acknowledge("haus-alarm", "ACK 99", "GW", ids, 8) == 0);
     std::string ackB = "ACK " + std::to_string(b);
-    int n = t.acknowledge("haus-alarm", ackB.c_str(), ids, 8);
+    int n = t.acknowledge("haus-alarm", ackB.c_str(), "GW", ids, 8);
     check("ACK <Nr> bestätigt genau einen", n == 1 && ids[0] == b && t.openIdOf(Kind::PING, 1) == 0 && t.openIdOf(Kind::RULE, 0) == a);
-    n = t.acknowledge("haus-alarm", "ACK", ids, 8);
+    n = t.acknowledge("haus-alarm", "ACK", "GW", ids, 8);
     check("ACK ohne Nr bestätigt alle im Kanal", n == 1 && ids[0] == a && t.openIdOf(Kind::RULE, 0) == 0);
     check("anderer Kanal bleibt offen", t.openIdOf(Kind::RULE, 3) == c);
     check("Bestätigtes wird nicht wiederholt", t.due(10 * MIN) != -1 && t.at(t.due(10 * MIN)).id == c);
     check("Web-Bestätigung", t.acknowledgeId(c) && t.openIdOf(Kind::RULE, 3) == 0 && !t.acknowledgeId(c));
+  }
+
+  // --- Gezieltes ACK und Zabbix-Zweitkanal (E41) ---
+  {
+    char tg[32];
+    int id;
+    check("parse: Ziel aus @[Name]", Tracker::parseAck("@[DE-XX-ORT02-GW] ACK 4", id, tg, sizeof(tg)) && id == 4 && std::string(tg) == "DE-XX-ORT02-GW", tg);
+    check("parse: ohne @ kein Ziel", Tracker::parseAck("ACK 4", id, tg, sizeof(tg)) && tg[0] == 0);
+    Tracker t;
+    uint8_t a = t.open(Kind::RULE, 0, "haus-alarm", "A", 0);
+    t.setZbx(a, "zbx", "R1234", true, 31.0f);
+    uint8_t ids[8];
+    check("ACK an anderes Gateway -> -2, bleibt offen", t.acknowledge("haus-alarm", "@[Anderes-GW] ACK", "DE-GW", ids, 8) == -2 && t.openIdOf(Kind::RULE, 0) == a);
+    check("Zabbix-Kanal nur mit Zweitkanal-Eintrag", t.at(0).channel2[0] && std::string(t.at(0).marker) == "R1234");
+    std::string m = "@[de-gw] ACK " + std::to_string(a);
+    check("ACK im Zabbix-Kanal, Name ohne Groß/klein", t.acknowledge("zbx", m.c_str(), "DE-GW", ids, 8) == 1 && t.openIdOf(Kind::RULE, 0) == 0);
+    uint8_t b = t.open(Kind::RULE, 1, "haus-alarm", "B", 0);
+    check("ohne Zweitkanal: ACK in zbx greift nicht", t.acknowledge("zbx", "ACK", "DE-GW", ids, 8) == 0 && t.openIdOf(Kind::RULE, 1) == b);
+    check("leerer Kanal greift nie", t.acknowledge("", "ACK", "DE-GW", ids, 8) == 0);
   }
 
   // --- Neuer Alarm derselben Quelle ersetzt, Nummern, Verdrängen ---

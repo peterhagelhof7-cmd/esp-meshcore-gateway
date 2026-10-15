@@ -58,6 +58,10 @@ static bool parse(const char* json, size_t len, const Config& old, Config& c, St
   cpy(c.settings.onlineText, sizeof(c.settings.onlineText), st["onlineText"] | "");
   cpy(c.settings.pingDownText, sizeof(c.settings.pingDownText), st["pingDownText"] | "");
   cpy(c.settings.pingUpText, sizeof(c.settings.pingUpText), st["pingUpText"] | "");
+  c.settings.zbxMode = constrain((int)(st["zbxMode"] | 0), 0, 2);
+  cpy(c.settings.zbxChannel, sizeof(c.settings.zbxChannel), st["zbxChannel"] | "");
+  c.settings.heartbeatH = constrain((int)(st["heartbeatH"] | 0), 0, 24);
+  if (c.settings.zbxMode == ZBX_CHANNEL && !c.settings.zbxChannel[0]) { err = "Zabbix-Kanal wählen (oder Kennung im Alarmtext)"; return false; }
 
   JsonArray devs = doc["devices"];
   if (devs.size() > MAX_DEVICES) { err = "Maximal 8 Geräte"; return false; }
@@ -147,6 +151,9 @@ static void serialize(const Config& c, String& out, bool maskPass) {
   st["onlineText"] = c.settings.onlineText;
   st["pingDownText"] = c.settings.pingDownText;
   st["pingUpText"] = c.settings.pingUpText;
+  st["zbxMode"] = c.settings.zbxMode;
+  st["zbxChannel"] = c.settings.zbxChannel;
+  st["heartbeatH"] = c.settings.heartbeatH;
   JsonArray devs = doc["devices"].to<JsonArray>();
   for (int i = 0; i < MAX_DEVICES; i++) {
     const Device& x = c.devices[i];

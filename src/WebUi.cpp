@@ -20,6 +20,7 @@
 #include "Profile.h"
 #include "SmConfig.h"
 #include "SmPoller.h"
+#include "ZbxForwarder.h"
 #include "web/index_html.h"
 
 static AsyncWebServer server(80);
@@ -505,6 +506,8 @@ static void handleBackupExtra(AsyncWebServerRequest* req) {
   free(acl);
   j += "],\"sensormeter\":";
   sm::toJson(j, !secrets);
+  j += ",\"zabbix\":";
+  zbx_fwd::configJson(j);
   j += '}';
   req->send(200, "application/json", j);
 }
@@ -620,6 +623,35 @@ static void handleSmSave(AsyncWebServerRequest* req) {
   req->send(200, "application/json", "{\"ok\":true}");
 }
 
+// ---------- Zabbix-Weiterleitung (E41) ----------
+static void handleZbxGet(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String j = "{\"config\":";
+  zbx_fwd::configJson(j);
+  j += ",\"status\":";
+  zbx_fwd::statusJson(j);
+  j += '}';
+  req->send(200, "application/json", j);
+}
+
+static void handleZbxSave(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String json = formParam(req, "json");
+  String err;
+  if (json.isEmpty() || !zbx_fwd::setFromJson(json.c_str(), json.length(), err)) {
+    if (err.isEmpty()) err = "keine Daten";
+    req->send(400, "application/json", "{\"error\":\"" + jsonEscape(err) + "\"}");
+    return;
+  }
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void handleZbxTest(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  zbx_fwd::requestTest();
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
 static void handleSmPoll(AsyncWebServerRequest* req) {
   if (!checkAuth(req)) return;
   if (!sm_poller::pollNow(formParam(req, "idx").toInt())) {
@@ -701,6 +733,9 @@ void web_ui::begin() {
   server.on(AsyncURIMatcher::exact("/api/log/clear"), HTTP_POST, handleLogClear);
   server.on(AsyncURIMatcher::exact("/api/sm"), HTTP_GET, handleSmGet);
   server.on(AsyncURIMatcher::exact("/api/sm/save"), HTTP_POST, handleSmSave);
+  server.on(AsyncURIMatcher::exact("/api/zbx"), HTTP_GET, handleZbxGet);
+  server.on(AsyncURIMatcher::exact("/api/zbx/save"), HTTP_POST, handleZbxSave);
+  server.on(AsyncURIMatcher::exact("/api/zbx/test"), HTTP_POST, handleZbxTest);
   server.on(AsyncURIMatcher::exact("/api/sm/poll"), HTTP_POST, handleSmPoll);
   server.on(AsyncURIMatcher::exact("/api/sm/test"), HTTP_POST, handleSmTest);
   server.on(AsyncURIMatcher::exact("/api/sm/ack"), HTTP_POST, handleSmAck);

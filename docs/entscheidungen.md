@@ -749,3 +749,39 @@ während des Schreibens gesperrt).
 App-Erwähnung, Wiederholung, Web-Bestätigung, Ping-Haken; feste IP: Vorbelegung, belegt/eigene/frei/anderes
 Subnetz, Router außerhalb, Backup, zurück auf DHCP). **Nicht auf HW getestet:** echte ARP/Ping-Prüfung, Umschalten
 nach dem Neustart, Rückfall auf DHCP, ACK per App.
+
+## E41 – Zabbix-Anbindung: Kennung im Alarmtext + Empfänger mit Trapper und ACK (2026-10-15, User: „ack soll kommen wenn die info am zabbix angekommen ist … parsebarer teil im normalen alarm text … alternativ einen sekundären alarmkanal … baue direkt in die 090“), 0.9.0
+
+- **Gegenseite = gleiche Firmware**, Funktion „Zabbix-Weiterleitung“ (`src/ZbxForwarder.*`). Keine eigene
+  Empfänger-Firmware: alles Nötige (Kanäle entschlüsseln, WLAN, Web, Backup, OTA) ist schon da; zweimal pflegen
+  bei jedem MeshCore-Update wäre der einzige Effekt.
+- **Weg nach Zabbix: Trapper (Zabbix-Sender-Protokoll)** statt HTTP-Agent/MQTT: Push ohne Zeitverzug, Proxy puffert,
+  und `processed: 1` ist die Annahmebestätigung, an die das ACK geknüpft wird (User: ACK = angekommen). Bei
+  Proxy-Hosts muss an den Proxy gesendet werden. `history.push` (API, ab 7.0) nicht genutzt: braucht Token und
+  HTTPS-Handling auf dem ESP, Trapper reicht.
+- **Kennung** `" #Z1;<Quelle>;<Ereignis>;<Wert>;<ACK>"` am Textende (User: im normalen Alarmtext). Text wird gekürzt,
+  Kennung nie (`zbx::appendMarker`, UTF-8-sicher). Quelle = Typbuchstabe + CRC-16 aus Gerätename|Messwert|Richtung
+  (Regel), Name (Ping, Gerät), stabil bei Grenzwert-/Reihenfolgeänderung. Version im Präfix (Z1) für spätere
+  Formatänderungen. Alternative **Zabbix-Kanal** (User): Alarmkanal ohne Kennung, Kopie mit Kennung in eigenen
+  Kanal; ACK aus beiden Kanälen gilt (`Entry::channel2`). Lebenszeichen optional (H), nur mit Kennung.
+- **Gezieltes ACK** `@[Name] ACK n`: gilt nur beim Gateway dieses Namens (Groß/klein egal). Nötig, weil jedes
+  Gateway seine Nummern 1..99 selbst vergibt – bei mehreren Gateways im Kanal hätte „ACK 3“ alle getroffen.
+  Ohne `@[…]` wie bisher an alle.
+- Empfänger: Queue aus dem loopTask, eigener Task (Core 0, 8 KB), 16 wartende Meldungen im PSRAM, Wiederholung alle
+  30 s bis 1 h bei Verbindungsfehlern; abgelehnt (`failed`) = dauerhaft, kein ACK, Grund im Log. Schon gemeldete
+  (Gateway, ACK-Nr) innerhalb 24 h nicht erneut an Zabbix, nur erneut bestätigen (max. alle 60 s) – fängt
+  Wiederholungen ab, die vor dem ACK unterwegs waren. Kein `clock` im Request (Zabbix nimmt Empfangszeit; die
+  Uhr des Empfängers ist vor NTP nicht verlässlich).
+- **Template** `docs/zabbix-template-meshcore.yaml` (Format 7.0): Trapper `meshcore.event` (TEXT/JSON) je Gateway-Host,
+  Trigger auf dem Master-Item mit `MULTIPLE` + Tag-Korrelation `src` (Problem bei ev A/F, Ende bei state OK).
+  **Nicht** als Trigger-Prototyp über LLD: der erste Wert einer neuen Quelle kommt an, bevor die Discovery das Item
+  angelegt hat – der allererste Alarm ginge verloren. LLD zusätzlich für Zustand/Text/Wert je Quelle (Verlauf).
+  Empfänger-Template mit `meshcore.rx.heartbeat` + nodata.
+
+**Verifikation:** Build V4 + R8 grün (21,3 % App-Slot), 0 Warnungen in `src/`, Host-Tests grün (neu: Zabbix-Format:
+Kennung bauen/lesen/kürzen, CRC, Sender-Kopf, Antwort-Parser, JSON-Escape; ACK mit Ziel + Zweitkanal), UI-Test 198/198
+(neu: Kennung im Text, ACK an fremdes Gateway ignoriert, Zabbix-Kanal ohne Kanal abgelehnt, Kopie mit Kennung, ACK
+im Zabbix-Kanal; Empfänger: ohne Server abgelehnt, Zabbix offline → wartet ohne ACK, nach Korrektur übergeben + ACK,
+Ablehnung ohne ACK, ohne Kennung ignoriert, Kanalfilter, Testwert, Backup). Template: YAML gültig, JS-Vorverarbeitung
+und Trigger-Regexe gegen Beispielmeldungen geprüft. **Nicht getestet:** echter Zabbix-Import, echter Trapper-Versand
+(Mock simuliert Zabbix), Funkstrecke Gateway → Empfänger.

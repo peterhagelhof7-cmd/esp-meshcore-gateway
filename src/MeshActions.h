@@ -6,7 +6,7 @@
 // Wie bei der CLI (E4): nur Queue, MeshCore wird ausschließlich im loopTask
 // angefasst.
 namespace mesh_actions {
-  enum class Origin : uint8_t { WEB, ALERT };
+  enum class Origin : uint8_t { WEB, ALERT, ZBX };
 
   static const size_t MAX_TEXT = 160;   // MAX_TEXT_LEN in BaseChatMesh, inkl. "Name: "
 

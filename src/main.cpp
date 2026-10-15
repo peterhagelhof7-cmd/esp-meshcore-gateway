@@ -24,6 +24,7 @@
 #include "OtaUpdate.h"
 #include "SmConfig.h"
 #include "SmPoller.h"
+#include "ZbxForwarder.h"
 #include "WebUi.h"
 
 #if !defined(ESP32)
@@ -159,6 +160,7 @@ void setup() {
   ota_update::begin();
   sm::begin();
   sm_poller::begin();   // eigener Task auf Core 0
+  zbx_fwd::begin();     // Zabbix-Weiterleitung (E41), eigener Task auf Core 0
   console_log.push('s', the_mesh.getRTCClock()->getCurrentTime(), "Gateway gestartet, MeshCore " FIRMWARE_VERSION);
 
   if (first_boot) {

@@ -317,6 +317,79 @@ async function runCli(page, cmd) {
     check('ACK: Web-Bestätigung + Rückmeldung in den Kanal', await until(async () => (await t('#smLog')).includes('sensormeter -> ACK ' + ackId2 + ' bestätigt (Web)') &&
       await page.$eval('#ackSec', e => e.hidden)), (await t('#smLog')).slice(-200));
     await page.screenshot({ path: out + '/11_ack.png', fullPage: true });
+
+    // ---------- Zabbix-Kennung am Gateway (E41) ----------
+    const chanIn = (ch, x) => page.evaluate((ch, x) => fetch('/api/mock/chanmsg', { method: 'POST', body: new URLSearchParams({ channel: ch, text: x }) }), ch, x);
+    const ssSave = async () => { await page.$eval('#ssMsg', e => e.textContent = ''); await page.click('#ssSave'); await until(async () => /Gespeichert|wählen/.test(await t('#ssMsg'))); return t('#ssMsg'); };
+    const newAlarm = async thr => {   // Grenzwert ändern = neue Regel = neuer Alarm
+      await page.$$eval('#smRuleBody tr', r => r[2].querySelectorAll('button')[1].click());
+      await setVal('#srThr', String(thr)); await page.click('#srSave');
+      await until(async () => (await rows('#ackBody')).length === 1);
+      return (await rows('#ackBody'))[0][0];
+    };
+    check('ZBX: Kennung anfangs aus, Zusatzfelder versteckt', (await page.$eval('#ssZbx', e => e.value)) === '0' && await page.$eval('#ssZbxChBox', e => e.hidden) && await page.$eval('#ssHbBox', e => e.hidden));
+    await setVal('#ssMax', '40');
+    await page.select('#ssZbx', '1');
+    check('ZBX: „im Alarmtext“ zeigt Lebenszeichen, kein Kanalfeld', await page.$eval('#ssZbxChBox', e => e.hidden) && !(await page.$eval('#ssHbBox', e => e.hidden)));
+    check('ZBX: Modus 1 gespeichert', (await ssSave()) === 'Gespeichert');
+    let zid = await newAlarm(42);
+    check('ZBX: Kennung im Alarmtext mit Quelle, Wert, ACK-Nr', await until(async () => new RegExp('sensormeter -> \\[ACK ' + zid + '\\] ALARM Heizraum: Feuchte 45% \\(>42%\\) #Z1;R[0-9a-f]{4};A;45;' + zid).test(await t('#smLog'))), (await t('#smLog')).slice(-220));
+    await chanIn('sensormeter', 'Peter: @[Anderes-GW] ACK ' + zid);
+    await sleep(600);
+    check('ZBX: ACK an anderes Gateway wird ignoriert', (await rows('#ackBody')).length === 1 && !(await t('#smLog')).includes('ACK ' + zid + ' bestätigt'));
+    await page.$$eval('#ackBody tr', r => r[0].querySelector('button').click());
+    await until(async () => await page.$eval('#ackSec', e => e.hidden));
+    await page.select('#ssZbx', '2');
+    check('ZBX: „eigener Kanal“ zeigt Kanalauswahl', !(await page.$eval('#ssZbxChBox', e => e.hidden)));
+    check('ZBX: ohne Zabbix-Kanal abgelehnt', (await ssSave()).includes('Zabbix-Kanal wählen'), await t('#ssMsg'));
+    await page.select('#ssZbxCh', '#test');
+    check('ZBX: Modus 2 mit #test gespeichert', (await ssSave()) === 'Gespeichert');
+    zid = await newAlarm(43);
+    check('ZBX: Alarmkanal ohne Kennung', await until(async () => (await t('#smLog')).includes('sensormeter -> [ACK ' + zid + '] ALARM Heizraum: Feuchte 45% (>43%)\n') ||
+      new RegExp('sensormeter -> \\[ACK ' + zid + '\\] ALARM Heizraum: Feuchte 45% \\(>43%\\)(?! #Z1)').test(await t('#smLog'))), (await t('#smLog')).slice(-300));
+    check('ZBX: Kopie mit Kennung im Zabbix-Kanal', await until(async () => new RegExp('#test -> \\[ACK ' + zid + '\\] ALARM Heizraum: Feuchte 45% \\(>43%\\) #Z1;').test(await t('#smLog'))), (await t('#smLog')).slice(-300));
+    await chanIn('#test', 'Zbx-RX: @[Heltec Repeater] ACK ' + zid);
+    check('ZBX: gezieltes ACK im Zabbix-Kanal bestätigt', await until(async () => (await t('#smLog')).includes('#test -> ACK ' + zid + ' bestätigt (Zbx-RX)') && await page.$eval('#ackSec', e => e.hidden)), (await t('#smLog')).slice(-200));
+    await page.select('#ssZbx', '0');
+    await ssSave();
+
+    // ---------- Zabbix-Weiterleitung (Empfänger, E41) ----------
+    const zbStat = async () => (await page.evaluate(async () => (await (await fetch('/api/zbx')).json()).status));
+    const zbSave = async () => { await page.$eval('#zbMsg', e => e.textContent = ''); await page.click('#zbSave'); await until(async () => (await t('#zbMsg')) !== ''); return t('#zbMsg'); };
+    check('ZBX-RX: anfangs aus, Status versteckt', !(await page.$eval('#zbEn', e => e.checked)) && await page.$eval('#zbStat', e => e.hidden));
+    await page.$eval('#zbEn', e => { e.checked = true; e.dispatchEvent(new Event('input')); });
+    check('ZBX-RX: ohne Server abgelehnt', (await zbSave()) === 'Zabbix-Server fehlt', await t('#zbMsg'));
+    await setVal('#zbSrv', 'offline');
+    check('ZBX-RX: gespeichert', (await zbSave()) === 'Gespeichert');
+    await chanIn('sensormeter', 'Remote-GW: [ACK 5] ALARM Halle: Temperatur 31°C (>30°C) #Z1;R1234;A;31;5');
+    check('ZBX-RX: Zabbix nicht erreichbar -> wartet, kein ACK', await until(async () => { const s = await zbStat(); return s.pending === 1 && s.acks === 0 && s.lastError.startsWith('keine Verbindung'); }), JSON.stringify(await zbStat()));
+    check('ZBX-RX: kein ACK im Kanal', !(await t('#smLog')).includes('@[Remote-GW] ACK 5'));
+    await setVal('#zbSrv', '192.168.1.20');
+    await zbSave();
+    check('ZBX-RX: nach Korrektur übergeben, Host = Gateway-Name', await until(async () => (await t('#smLog')).includes('Zabbix <- remote-gw meshcore.event: {"src": "R1234", "ev": "A", "state": "ALARM", "value": 31.0, "ack": 5')), (await t('#smLog')).slice(-300));
+    check('ZBX-RX: ACK erst nach Annahme durch Zabbix', await until(async () => (await t('#smLog')).includes('sensormeter -> @[Remote-GW] ACK 5')), (await t('#smLog')).slice(-200));
+    check('ZBX-RX: Zähler', await until(async () => { const s = await zbStat(); return s.forwarded === 1 && s.acks === 1 && s.pending === 0; }), JSON.stringify(await zbStat()));
+    await chanIn('sensormeter', 'Unbekannt-GW: ALARM x #Z1;R0001;A;1;7');
+    check('ZBX-RX: Zabbix lehnt Host ab -> kein ACK, Fehler', await until(async () => { const s = await zbStat(); return s.rejected === 1 && s.lastError.includes('unbekannt-gw'); }) &&
+      !(await t('#smLog')).includes('@[Unbekannt-GW] ACK 7'), JSON.stringify(await zbStat()));
+    await chanIn('sensormeter', 'Peter: hallo zusammen');
+    await sleep(500);
+    check('ZBX-RX: Nachricht ohne Kennung nicht weitergeleitet', (await zbStat()).received === 2, JSON.stringify(await zbStat()));
+    await setVal('#zbCh', '#test');
+    await zbSave();
+    await chanIn('sensormeter', 'Remote-GW: ALARM y #Z1;R1234;A;32;');
+    await sleep(500);
+    check('ZBX-RX: Kanalfilter', (await zbStat()).received === 2, JSON.stringify(await zbStat()));
+    await page.click('#zbTest');
+    check('ZBX-RX: Testwert angenommen', await until(async () => (await t('#zbStat')).includes('OK: heltec-repeater / meshcore.rx.heartbeat angenommen'), 8000), await t('#zbStat'));
+    const bkZ = await page.evaluate(async () => (await (await fetch('/api/backup/extra')).json()).zabbix);
+    check('ZBX-RX: im Backup', bkZ && bkZ.server === '192.168.1.20' && bkZ.channels === '#test' && bkZ.enabled === true, JSON.stringify(bkZ));
+    await page.screenshot({ path: out + '/13_zabbix.png', fullPage: true });
+    await page.$eval('#zbEn', e => { e.checked = false; e.dispatchEvent(new Event('input')); });
+    await setVal('#zbCh', '');
+    await zbSave();
+    // Sendelimit bleibt bei 40: der Mock zählt die Stunde nicht zurück, der Ping-Test braucht noch Luft
+
     await page.$$eval('#smRuleBody tr', r => r[2].querySelectorAll('button')[2].click());   // Regel wieder löschen
     await until(async () => (await rows('#smRuleBody')).length === 2);
 
