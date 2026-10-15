@@ -3,14 +3,14 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
-#include <ping/ping_sock.h>
-#include <lwip/ip_addr.h>
 #include <new>
 
+#include "AckTracker.h"
 #include "ChannelStore.h"
 #include "EventLog.h"
 #include "LogBuffer.h"
 #include "MeshActions.h"
+#include "NetCheck.h"
 #include "NetworkManager.h"
 #include "RuleEngine.h"
 #include "SmConfig.h"
@@ -58,11 +58,20 @@ struct Runtime {
   RuleRuntime rule[MAX_RULES];
   PingRuntime ping[MAX_PINGS];
   rules::RateLimiter limiter;
+  ack::Tracker acks;               // Bestätigungspflicht (E39)
   volatile bool pollFlag[MAX_DEVICES];
+};
+
+// Kanalantwort "ACK [Nr]" aus dem loopTask an den Poller-Task (E39)
+struct AckMsg {
+  char channel[ack::CHANNEL_LEN];
+  char sender[32];
+  char body[40];
 };
 
 Runtime* R = nullptr;              // PSRAM
 SemaphoreHandle_t s_lock = nullptr;   // schützt R (außer der HTTP-Abfrage selbst)
+QueueHandle_t s_ackQueue = nullptr;
 volatile float s_chipTemp = NAN;      // letzte Messung, auch ohne Überwachung
 
 DevRuntime& runtimeOf(int di) { return di == INTERNAL_DEVICE ? R->internal : R->dev[di]; }
@@ -71,37 +80,116 @@ void logLine(char type, const char* text) {
   alert_log.push(type, (uint32_t)time(nullptr), text);
 }
 
-// Meldung erzeugen und (begrenzt) senden. Aufrufer hält s_lock.
-void emit(const char* channelName, const char* text, bool countLimit) {
+// Meldung erzeugen und (begrenzt) senden. Aufrufer hält s_lock. true = in die
+// Sende-Warteschlange gestellt.
+bool emit(const char* channelName, const char* text, bool countLimit) {
   int channel = channel_store::findByName(channelName);
   if (!channelName || !*channelName) {
     char l[LogBuffer::LINE_LEN];
     snprintf(l, sizeof(l), "kein Kanal gewählt: %s", text);
     logLine('X', l);
-    return;
+    return false;
   }
   GwChannel c;
   if (!channel_store::get(channel, c)) {
     char l[LogBuffer::LINE_LEN];
     snprintf(l, sizeof(l), "Kanal \"%s\" existiert nicht: %s", channelName, text);
     logLine('X', l);
-    return;
+    return false;
   }
   if (countLimit && !R->limiter.allow(millis())) {
     char l[LogBuffer::LINE_LEN];
     snprintf(l, sizeof(l), "Sendelimit (%d/h) erreicht, unterdrückt: %s", R->cfg.settings.maxPerHour, text);
     logLine('X', l);
-    return;
+    return false;
   }
   if (!mesh_actions::sendChannel(channel, text, mesh_actions::Origin::ALERT)) {
     char l[LogBuffer::LINE_LEN];
     snprintf(l, sizeof(l), "Warteschlange voll, verworfen: %s", text);
     logLine('X', l);
-    return;
+    return false;
   }
   char l[LogBuffer::LINE_LEN];
   snprintf(l, sizeof(l), "%s -> %s", c.name, text);
   logLine('A', l);
+  return true;
+}
+
+// Alarm senden; mit Bestätigungspflicht vorher offen eintragen (Nummer im
+// Text). Wird die erste Meldung unterdrückt (Sendelimit), bleibt der Eintrag
+// offen und die Wiederholungen holen sie nach. Aufrufer hält s_lock.
+void emitAlarm(ack::Kind kind, int src, bool ackRequired, const char* channelName, const char* text) {
+  if (!ackRequired) { emit(channelName, text, true); return; }
+  R->acks.open(kind, src, channelName, text, millis());
+  for (int i = 0; i < ack::MAX_OPEN; i++) {
+    const ack::Entry& e = R->acks.at(i);
+    if (!e.used || e.kind != kind || e.src != src) continue;
+    char out[mesh_actions::MAX_TEXT + 1];
+    ack::Tracker::format(e, false, out, sizeof(out));
+    emit(channelName, out, true);
+    return;
+  }
+}
+
+// Erinnerung (repeatMin) einer Quelle mit offener Nummer trägt die Nummer mit.
+void emitReminder(ack::Kind kind, int src, const char* channelName, const char* text) {
+  uint8_t id = R->acks.openIdOf(kind, src);
+  if (!id) { emit(channelName, text, true); return; }
+  char out[mesh_actions::MAX_TEXT + 1];
+  snprintf(out, sizeof(out), "[ACK %u] %s", (unsigned)id, text);
+  emit(channelName, out, true);
+}
+
+// Fällige Wiederholungen (höchstens eine pro Durchlauf). Aufrufer hält s_lock.
+void processRepeats() {
+  uint32_t now = millis();
+  int i = R->acks.due(now);
+  if (i < 0) return;
+  const ack::Entry& e = R->acks.at(i);
+  char out[mesh_actions::MAX_TEXT + 1];
+  ack::Tracker::format(e, true, out, sizeof(out));
+  if (emit(e.channel, out, true)) {
+    R->acks.repeated(i, now);
+    if (e.repeats >= ack::REPEATS) {
+      char l[LogBuffer::LINE_LEN];
+      snprintf(l, sizeof(l), "[ACK %u] nach %d Wiederholungen weiter unbestätigt (bestätigen bis 24 h möglich)",
+               (unsigned)e.id, ack::REPEATS);
+      logLine('S', l);
+    }
+  } else {
+    R->acks.postpone(i, now);
+  }
+}
+
+// Antworten "ACK [Nr]" aus den Kanälen. Aufrufer hält s_lock.
+void processAckReplies() {
+  AckMsg m;
+  while (s_ackQueue && xQueueReceive(s_ackQueue, &m, 0) == pdTRUE) {
+    uint8_t ids[ack::MAX_OPEN];
+    int n = R->acks.acknowledge(m.channel, m.body, ids, ack::MAX_OPEN);
+    if (n < 0) continue;
+    char l[LogBuffer::LINE_LEN];
+    if (n == 0) {
+      snprintf(l, sizeof(l), "%s: \"%s\" von %s - nichts Offenes dazu", m.channel, m.body, m.sender);
+      logLine('S', l);
+      continue;
+    }
+    char list[48] = {0};
+    size_t p = 0;
+    for (int k = 0; k < n && k < ack::MAX_OPEN; k++) {
+      int w = snprintf(list + p, sizeof(list) - p, "%s%u", k ? "," : "", (unsigned)ids[k]);
+      if (w < 0 || (size_t)w >= sizeof(list) - p) break;
+      p += w;
+    }
+    // Rückmeldung in den Kanal (zählt nicht gegen das Sendelimit: eine
+    // Nachricht je Bestätigung, ausgelöst von Menschen)
+    char out[mesh_actions::MAX_TEXT + 1];
+    snprintf(out, sizeof(out), "ACK %s bestätigt (%s)", list, m.sender);
+    emit(m.channel, out, false);
+    snprintf(l, sizeof(l), "[ACK %s] bestätigt von %s in %s", list, m.sender, m.channel);
+    logLine('S', l);
+    event_log::addf("ALARM", "ACK %s bestätigt von %s (%s)", list, m.sender, m.channel);
+  }
 }
 
 const char* tplOr(const char* t, const char* def) { return (t && *t) ? t : def; }
@@ -139,6 +227,11 @@ void syncConfig() {
 
   R->gen = sm::copy(R->cfg);
   int keptDev = 0, keptRule = 0;
+  // Offene Bestätigungen folgen ihrer Regel bzw. ihrem Ping-Ziel (E39);
+  // gelöscht, geändert oder Haken entfernt -> Eintrag weg.
+  int8_t ruleMap[MAX_RULES], pingMap[MAX_PINGS];
+  memset(ruleMap, -1, sizeof(ruleMap));
+  memset(pingMap, -1, sizeof(pingMap));
   for (int i = 0; i < MAX_DEVICES; i++) {
     R->dev[i] = DevRuntime();
     R->pollFlag[i] = true;   // gleich neu abfragen
@@ -154,6 +247,7 @@ void syncConfig() {
       const Rule& o = oldCfg.rules[j];
       if (o.used && sameRule(r, deviceOf(R->cfg, r.device), o, deviceOf(oldCfg, o.device))) {
         R->rule[i] = oldRule[j];
+        if (r.ackRequired) ruleMap[j] = (int8_t)i;
         keptRule++;
         break;
       }
@@ -164,9 +258,15 @@ void syncConfig() {
     R->ping[i] = PingRuntime();
     if (!R->cfg.pings[i].used) continue;
     for (int j = 0; j < MAX_PINGS; j++) {
-      if (oldCfg.pings[j].used && !strcmp(oldCfg.pings[j].host, R->cfg.pings[i].host)) { R->ping[i] = oldPing[j]; break; }
+      if (oldCfg.pings[j].used && !strcmp(oldCfg.pings[j].host, R->cfg.pings[i].host)) {
+        R->ping[i] = oldPing[j];
+        if (R->cfg.pings[i].ackRequired) pingMap[j] = (int8_t)i;
+        break;
+      }
     }
   }
+  R->acks.remap(ack::Kind::RULE, ruleMap, MAX_RULES);
+  R->acks.remap(ack::Kind::PING, pingMap, MAX_PINGS);
   R->limiter.setMaxPerHour(R->cfg.settings.maxPerHour);
   char l[96];
   snprintf(l, sizeof(l), "Konfiguration übernommen (%d Geräte, %d Regeln mit Zustand behalten)", keptDev, keptRule);
@@ -250,77 +350,21 @@ void evaluateDevice(int di, bool ok, uint32_t now) {
                                                  : tplOr(r.text, tplOr(R->cfg.settings.alertText, DEFAULT_ALERT));
     char text[mesh_actions::MAX_TEXT + 1];
     ruleText(r, d, rt, state, tpl, text, sizeof(text));
-    emit(r.channel[0] ? r.channel : R->cfg.settings.defaultChannel, text, true);
+    const char* ch = r.channel[0] ? r.channel : R->cfg.settings.defaultChannel;
+    if (e == rules::Event::ALERT) {
+      emitAlarm(ack::Kind::RULE, ri, r.ackRequired, ch, text);
+    } else if (e == rules::Event::REMIND) {
+      emitReminder(ack::Kind::RULE, ri, ch, text);
+    } else {
+      R->acks.markCleared(ack::Kind::RULE, ri);   // bleibt bis ACK offen (E39)
+      emit(ch, text, true);
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
 // Ping-Check (E25)
 // ---------------------------------------------------------------------------
-
-struct PingCtx {
-  SemaphoreHandle_t done;
-  uint32_t replies;
-  uint32_t bestRtt;
-};
-
-void onPingSuccess(esp_ping_handle_t hdl, void* args) {
-  PingCtx* c = (PingCtx*)args;
-  uint32_t t = 0;
-  esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &t, sizeof(t));
-  if (c->replies == 0 || t < c->bestRtt) c->bestRtt = t;
-  c->replies++;
-}
-void onPingEnd(esp_ping_handle_t hdl, void* args) {
-  xSemaphoreGive(((PingCtx*)args)->done);
-}
-
-// Blockiert bis ca. 1,5 s (3 Pakete à 200 ms Abstand, 1 s Timeout). true =
-// mindestens eine Antwort. Läuft ohne gehaltenen Mutex im Poller-Task.
-bool pingHost(const char* host, uint32_t& rttMs, char* ipOut, size_t ipLen, char* err, size_t errLen) {
-  IPAddress ip;
-  if (!ip.fromString(host)) {
-    if (!WiFi.hostByName(host, ip) || ip == IPAddress(0, 0, 0, 0)) {
-      snprintf(err, errLen, "Name nicht auflösbar");
-      return false;
-    }
-  }
-  snprintf(ipOut, ipLen, "%s", ip.toString().c_str());
-
-  esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
-  cfg.count = 3;
-  cfg.interval_ms = 200;
-  cfg.timeout_ms = 1000;
-  cfg.task_stack_size = 3072;
-  IP_ADDR4(&cfg.target_addr, ip[0], ip[1], ip[2], ip[3]);
-
-  PingCtx ctx;
-  ctx.done = xSemaphoreCreateBinary();
-  ctx.replies = 0;
-  ctx.bestRtt = 0;
-  if (!ctx.done) { snprintf(err, errLen, "kein Speicher"); return false; }
-
-  esp_ping_callbacks_t cbs = {};
-  cbs.cb_args = &ctx;
-  cbs.on_ping_success = onPingSuccess;
-  cbs.on_ping_end = onPingEnd;
-  esp_ping_handle_t h = nullptr;
-  if (esp_ping_new_session(&cfg, &cbs, &h) != ESP_OK) {
-    vSemaphoreDelete(ctx.done);
-    snprintf(err, errLen, "Ping-Sitzung fehlgeschlagen");
-    return false;
-  }
-  esp_ping_start(h);
-  bool ended = xSemaphoreTake(ctx.done, pdMS_TO_TICKS(5000)) == pdTRUE;
-  esp_ping_stop(h);
-  esp_ping_delete_session(h);
-  vSemaphoreDelete(ctx.done);
-  if (!ended) { snprintf(err, errLen, "Ping hängt"); return false; }
-  if (ctx.replies == 0) { snprintf(err, errLen, "keine Antwort"); return false; }
-  rttMs = ctx.bestRtt;
-  err[0] = 0;
-  return true;
-}
 
 void evaluatePing(int pi, bool ok, uint32_t now) {
   // Aufrufer hält s_lock
@@ -335,7 +379,13 @@ void evaluatePing(int pi, bool ok, uint32_t now) {
                          : tplOr(R->cfg.settings.pingUpText, DEFAULT_PING_UP);
   char text[mesh_actions::MAX_TEXT + 1];
   rules::renderTemplate(tpl, v, text, sizeof(text));
-  emit(R->cfg.settings.defaultChannel, text, true);   // Alarmkanal = Standardkanal
+  // Alarmkanal = Standardkanal
+  if (down) {
+    emitAlarm(ack::Kind::PING, pi, t.ackRequired, R->cfg.settings.defaultChannel, text);
+  } else {
+    R->acks.markCleared(ack::Kind::PING, pi);
+    emit(R->cfg.settings.defaultChannel, text, true);
+  }
 }
 
 void pingCycle() {
@@ -350,7 +400,7 @@ void pingCycle() {
 
     uint32_t rtt = 0;
     char ip[16] = {0}, err[48] = {0};
-    bool ok = pingHost(t.host, rtt, ip, sizeof(ip), err, sizeof(err));
+    bool ok = net_check::ping(t.host, rtt, ip, sizeof(ip), err, sizeof(err));
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (R->gen == gen) {
@@ -422,6 +472,9 @@ void task(void*) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     syncConfig();
     bool enabled = R->cfg.settings.enabled;
+    // Bestätigungen und Wiederholungen gehen per Funk, also auch ohne WLAN (E39)
+    processAckReplies();
+    processRepeats();
     xSemaphoreGive(s_lock);
     measureInternal(enabled);
     if (!enabled) continue;
@@ -482,6 +535,7 @@ void task(void*) {
 void sm_poller::begin() {
   if (R) return;
   s_lock = xSemaphoreCreateMutex();
+  s_ackQueue = xQueueCreate(4, sizeof(AckMsg));
   void* mem = heap_caps_calloc(1, sizeof(Runtime), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!mem) mem = calloc(1, sizeof(Runtime));
   R = new (mem) Runtime();
@@ -534,6 +588,48 @@ static void esc(String& out, const char* s) {
 
 float sm_poller::chipTempC() { return s_chipTemp; }
 
+void sm_poller::onChannelText(const char* channelName, const char* text) {
+  if (!s_ackQueue || !channelName || !text) return;
+  // Kanaltexte sind "Absender: Nachricht" (BaseChatMesh)
+  const char* sep = strstr(text, ": ");
+  const char* body = sep ? sep + 2 : text;
+  int id;
+  if (!ack::Tracker::parseAck(body, id)) return;
+  AckMsg m;
+  strlcpy(m.channel, channelName, sizeof(m.channel));
+  size_t sl = sep ? (size_t)(sep - text) : 0;
+  if (sl >= sizeof(m.sender)) sl = sizeof(m.sender) - 1;
+  memcpy(m.sender, text, sl);
+  m.sender[sl] = 0;
+  if (!m.sender[0]) strlcpy(m.sender, "?", sizeof(m.sender));
+  strlcpy(m.body, body, sizeof(m.body));
+  xQueueSend(s_ackQueue, &m, 0);
+}
+
+bool sm_poller::ackFromWeb(int id, String& err) {
+  if (!R) { err = "nicht bereit"; return false; }
+  xSemaphoreTake(s_lock, portMAX_DELAY);
+  char channel[ack::CHANNEL_LEN] = {0};
+  for (int i = 0; i < ack::MAX_OPEN; i++) {
+    if (R->acks.at(i).used && R->acks.at(i).id == id) strlcpy(channel, R->acks.at(i).channel, sizeof(channel));
+  }
+  bool ok = id >= 1 && id <= 99 && R->acks.acknowledgeId((uint8_t)id);
+  if (ok) {
+    // Kanal erfährt es auch, sonst wartet dort jemand auf Wiederholungen
+    char out[mesh_actions::MAX_TEXT + 1];
+    snprintf(out, sizeof(out), "ACK %d bestätigt (Web)", id);
+    emit(channel, out, false);
+    char l[LogBuffer::LINE_LEN];
+    snprintf(l, sizeof(l), "[ACK %d] in der Weboberfläche bestätigt", id);
+    logLine('S', l);
+    event_log::addf("ALARM", "ACK %d in der Weboberfläche bestätigt", id);
+  } else {
+    err = "Nummer nicht (mehr) offen";
+  }
+  xSemaphoreGive(s_lock);
+  return ok;
+}
+
 // Ein Gerät als JSON (Sensormeter und Pseudo-Gerät INTERNAL_DEVICE). Aufrufer hält s_lock.
 static void devJson(String& out, int i, const DevRuntime& d, uint32_t now) {
   out += "{\"idx\":" + String(i);
@@ -562,7 +658,7 @@ static void devJson(String& out, int i, const DevRuntime& d, uint32_t now) {
 
 void sm_poller::statusJson(String& out) {
   out += "{\"devices\":[";
-  if (!R) { out += "],\"internal\":null,\"rules\":[],\"pings\":[],\"limit\":{\"used\":0,\"max\":0}}"; return; }
+  if (!R) { out += "],\"internal\":null,\"rules\":[],\"pings\":[],\"acks\":[],\"limit\":{\"used\":0,\"max\":0}}"; return; }
   xSemaphoreTake(s_lock, portMAX_DELAY);
   uint32_t now = millis();
   bool first = true;
@@ -585,7 +681,8 @@ void sm_poller::statusJson(String& out) {
     out += "{\"idx\":" + String(i) + ",\"state\":\"" + st + "\"";
     out += ",\"value\":" + (r.st.hasValue ? String(r.st.lastValue, 2) : String("null"));
     out += ",\"lastEvent\":\"" + String(r.lastEvent) + "\"";
-    out += ",\"lastEventAgoS\":" + (r.lastEventMs ? String((now - r.lastEventMs) / 1000) : String("null")) + "}";
+    out += ",\"lastEventAgoS\":" + (r.lastEventMs ? String((now - r.lastEventMs) / 1000) : String("null"));
+    out += ",\"ack\":" + String(R->acks.openIdOf(ack::Kind::RULE, i)) + "}";
   }
   out += "],\"pings\":[";
   first = true;
@@ -602,7 +699,22 @@ void sm_poller::statusJson(String& out) {
     esc(out, p.ip);
     out += "\",\"error\":\"";
     esc(out, p.error);
-    out += "\"}";
+    out += "\",\"ack\":" + String(R->acks.openIdOf(ack::Kind::PING, i)) + "}";
+  }
+  out += "],\"acks\":[";
+  first = true;
+  for (int i = 0; i < ack::MAX_OPEN; i++) {
+    const ack::Entry& e = R->acks.at(i);
+    if (!e.used) continue;
+    if (!first) out += ',';
+    first = false;
+    out += "{\"id\":" + String(e.id) + ",\"kind\":\"" + (e.kind == ack::Kind::RULE ? "rule" : "ping") + "\"";
+    out += ",\"src\":" + String(e.src) + ",\"channel\":\"";
+    esc(out, e.channel);
+    out += "\",\"text\":\"";
+    esc(out, e.text);
+    out += "\",\"ageS\":" + String((now - e.sentMs) / 1000) + ",\"repeats\":" + String(e.repeats);
+    out += ",\"max\":" + String(ack::REPEATS) + ",\"cleared\":" + String(e.cleared ? "true" : "false") + "}";
   }
   out += "],\"limit\":{\"used\":" + String(R->limiter.usedInWindow(now)) + ",\"max\":" + String(R->cfg.settings.maxPerHour) + "}}";
   xSemaphoreGive(s_lock);

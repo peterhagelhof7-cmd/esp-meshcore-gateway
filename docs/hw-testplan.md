@@ -81,3 +81,21 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 
 - [x] https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/ in Chrome: „Verbinden & prüfen“ am Standard-V4 → „Erkannt: Heltec WiFi LoRa 32 V4 (ESP32-S3R2, 2 MB PSRAM)“, Ausstattung zeigt „Embedded PSRAM 2MB“ (nur prüfen reicht, danach „Neu prüfen“/Tab schließen; das Gateway startet dabei neu) (2026-10-14 User: erkannt V4 2 MB; Gateway danach normal neu gestartet, 0.7.5 gültig)
 - [ ] Optional: Installieren ohne Löschen → 0.7.5 bleibt mit allen Einstellungen
+
+## 10. Aktiv bis bestätigt (E39, 0.9.0)
+- [ ] Regel mit Haken „aktiv bis bestätigt“, die sofort auslöst (z. B. Chiptemperatur > 30 °C, Kanal sps-alarm) → App zeigt `[ACK n] ALARM …`
+- [ ] Nach 5 min `[ACK n] WDH 1/3: …` in der App, Überwachung → Offene Bestätigungen „1 von 3“
+- [ ] In der App im Kanal `ACK n` antworten → Gateway antwortet `ACK n bestätigt (App-Name)`, keine weitere Wiederholung
+- [ ] Antwort über „Antworten“ in der App (`@[Gateway-Name] ack`) bestätigt ebenfalls
+- [ ] Neuer Alarm, Bestätigen über die Weboberfläche → `ACK n bestätigt (Web)` kommt in der App an
+- [ ] Ping-Ziel mit Haken auf nicht erreichbare Adresse → `[ACK n] PING-ALARM …`, Wiederholung, ACK
+- [ ] Testregel danach wieder löschen
+
+## 11. Feste IP (E40, 0.9.0)
+- [ ] System → WLAN: Haken „feste IP“ → Felder mit aktuellen Werten (IP, 255.255.255.0, Router 192.168.178.1)
+- [ ] „Adresse prüfen“ mit IP eines vorhandenen Geräts (z. B. Sensormeter .148) → „BELEGT“ mit MAC; Speichern abgelehnt
+- [ ] „Adresse prüfen“ mit Windows-PC-IP (Ping meist geblockt) → trotzdem „BELEGT“ (ARP)
+- [ ] Freie Adresse speichern → Neustart, Ereignis-Log: „prüfe, ob die Adresse frei ist“ → „Feste IP … aktiv, Router … erreichbar“; Weboberfläche unter neuer IP, Status „Adressvergabe: fest“
+- [ ] Danach Neustart ohne Prüfung (feste IP sofort), NTP/Sensormeter-Abfrage/Ping-Check laufen
+- [ ] Falschen Router eintragen (z. B. .253, im Subnetz, nicht vorhanden) → nach Neustart zurück auf DHCP, Grund im WLAN-Tab und Log
+- [ ] Haken weg → wieder DHCP

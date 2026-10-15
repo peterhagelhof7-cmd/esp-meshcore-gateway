@@ -698,3 +698,54 @@ Nachbarsuche nach Start findet B0A23599 (SNR 12 dB), Kanalnachricht auf Public g
 **Verifikation:** `flasher_test.js` 38/38 lokal (neu: Versionen im Kopf, Auswahl vollständig, bewährte vorausgewählt,
 Warnhinweis, MeshCore-Version in der Option, Dateien beider Versionen × beider Boards, R8-Ablauf mit 0.8.0, Auswahl
 während des Schreibens gesperrt).
+
+## E39 – Alarme „aktiv bis bestätigt“ (2026-10-15, User: „je Alarmregel einen Haken … bis bestätigt (über Antwort an das GW, mit dem Text ACK) wiederholen wir nach 5, 15 und 30 min“), 0.9.0
+
+- Anlass: Kanalnachrichten sind Flood ohne Bestätigung und ohne Speicher; wer gerade nicht im Mesh ist, verpasst
+  den Alarm. Room Server wurde abgewogen (eigene Identität, upstream nur RAM, Rollen werden upstream gerade getrennt)
+  und zurückgestellt.
+- Haken `ackRequired` je Regel **und je Ping-Ziel** (beides sind Alarmquellen mit eigener Zeile; Offline-Meldungen
+  von Sensormetern nicht).
+- **Antwort im Kanal, nicht als Direktnachricht:** Ein Repeater nimmt TXT-Nachrichten nur von angemeldeten
+  ACL-Clients an (`onPeerDataRecv`), normale Nutzer kämen nicht durch. Kanalnachrichten liest das Gateway ohnehin
+  (OLED-Seite 4). Bestätigt werden nur offene Alarme **desselben Kanals**.
+- Format: Alarm bekommt Nummer 1..99, Text `[ACK n] …` (Präfix statt Anhang, damit es beim Kürzen auf 160 Byte
+  nicht wegfällt). Antwort `ACK` = alle offenen im Kanal, `ACK n` = nur n; `@[Name]` (App-Antwort) davor erlaubt,
+  Groß/klein egal; ganze Sätze („ack, schau …“) zählen nicht. Rückmeldung `ACK n bestätigt (Absender)` in den Kanal
+  (ohne Sendelimit, einmal pro Bestätigung).
+- Wiederholungen **5, 15, 30 min nach der ersten Meldung** (meine Auslegung von „nach 5, 15 und 30 min“), Text
+  `[ACK n] WDH k/3: …`, mit „(inzw. OK)“, wenn der Wert inzwischen normal ist – die Wiederholung läuft weiter, weil
+  „aktiv bis bestätigt“ gemeint ist, nicht „solange verletzt“. Danach keine weitere; bestätigbar bis 24 h.
+- Sendelimit gilt auch für Wiederholungen; unterdrückt → 5 min später erneut (Stufe bleibt), mindestens 5 min
+  Abstand, damit nach einer Pause nicht alle auf einmal kommen.
+- Neuer Alarm derselben Quelle ersetzt den offenen Eintrag (neue Nummer). Regel geändert/gelöscht oder Haken weg →
+  Eintrag weg; Index-Verschiebungen beim Löschen werden nachgezogen (`Tracker::remap`). Max. 8 offene, sonst fällt
+  der älteste weg. Nur RAM (Neustart vergisst; anstehender Alarm wird dann ohnehin neu gemeldet).
+- Weboberfläche: Haken in Regel- und Ping-Formular, Zustand „ACK n offen“, Abschnitt „Offene Bestätigungen“ mit
+  „bestätigen“ (sendet „ACK n bestätigt (Web)“ in den Kanal, `/api/sm/ack`).
+- Logik in `src/AckTracker.*` ohne Arduino, Host-Test `test/host/ack_tracker_test.cpp`; Kanal-Empfang
+  (`GatewayMesh::onGroupDataRecv`, loopTask) → Queue → Poller-Task.
+
+## E40 – Feste IP-Adresse mit Belegt-Prüfung (2026-10-15, User: „IP, Subnetz, Gate, DNS als Optionen … überprüfen ob die IP frei ist bevor sie gesetzt wird“), 0.9.0
+
+- Felder IP, Maske, Gateway, DNS 1 (leer = Router), DNS 2; IP leer = DHCP. NVS `ip_addr/ip_mask/ip_gw/ip_dns1/
+  ip_dns2`, getrennt von MeshCore. Prüfung serverseitig (`GatewayConfig::applyIp`): Maske zusammenhängend /8–/30,
+  Router im Subnetz, keine Netz-/Broadcast-Adresse, IP ≠ Router.
+- **Belegt-Prüfung zweistufig:** (1) im Browser vor dem Speichern über `/api/wifi/checkip` (ARP-Anfrage im
+  lwIP-Thread + Ping, `src/NetCheck.*`), belegt → nicht speichern; anderes Subnetz/kein WLAN → Rückfrage.
+  (2) **maßgeblich beim nächsten Start:** neue Adresse (`ip_check`) → erst per DHCP verbinden, Adresse prüfen,
+  dann `WiFi.config`, danach Router per ARP/Ping prüfen. Belegt oder Router stumm → zurück auf DHCP, feste IP
+  verworfen, Grund im Ereignis-Log und im WLAN-Tab (`ip_note`). So sperrt man sich nicht aus und Konflikte mit
+  Geräten, die beim Speichern gerade aus waren, werden auch erkannt.
+- ARP statt nur Ping, weil viele Geräte (Windows-Firewall) Ping verwerfen, ARP aber beantworten müssen. Grenze:
+  ein noch gültiger ARP-Eintrag (bis 5 min) eines gerade abgeschalteten Geräts meldet „belegt“ – bewusst die
+  vorsichtige Seite.
+- Bekannte feste Adresse wird beim Start ohne Prüfung gesetzt. Backup enthält die IP-Felder; Wiederherstellung
+  prüft beim Start immer neu (Gerät kann woanders stehen).
+- Ping-Funktion aus SmPoller nach `net_check::ping` verschoben (gemeinsam genutzt).
+
+**Verifikation E39+E40:** Build V4 + R8 grün (je ca. 21 % App-Slot), 0 Warnungen in `src/`, Host-Tests grün
+(neu: Bestätigungspflicht), UI-Test 174/174 (neu: ACK-Ablauf mit Antwort im Kanal, falsche Nummer, Satz mit „ack“,
+App-Erwähnung, Wiederholung, Web-Bestätigung, Ping-Haken; feste IP: Vorbelegung, belegt/eigene/frei/anderes
+Subnetz, Router außerhalb, Backup, zurück auf DHCP). **Nicht auf HW getestet:** echte ARP/Ping-Prüfung, Umschalten
+nach dem Neustart, Rückfall auf DHCP, ACK per App.

@@ -63,5 +63,13 @@ if (Test-Path $ruleTest) {
     Invoke-Test $exe @((Join-Path $root 'test/host/fixtures'))
 }
 
+# 3) Bestaetigungspflicht (E39)
+$exe = Join-Path $out 'ack_tracker_test.exe'
+& g++ -std=gnu++11 -O2 -static -Wall -Wextra -I (Join-Path $root 'src') `
+    (Join-Path $root 'test/host/ack_tracker_test.cpp') (Join-Path $root 'src/AckTracker.cpp') -o $exe
+if ($LASTEXITCODE -ne 0) { throw 'Compile ack_tracker_test fehlgeschlagen' }
+Write-Host '== Bestaetigungspflicht'
+Invoke-Test $exe @()
+
 if ($failed) { Write-Host "$failed Testlauf/-laeufe mit Fehlern" -ForegroundColor Red; exit 1 }
 Write-Host 'Alle Host-Tests OK' -ForegroundColor Green

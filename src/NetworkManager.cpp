@@ -1,6 +1,7 @@
 #include "NetworkManager.h"
 #include "EventLog.h"
 #include "GatewayConfig.h"
+#include "NetCheck.h"
 
 #include <esp_sntp.h>
 
@@ -98,6 +99,113 @@ void NetworkManager::followDeviceName(unsigned long now) {
   if (_gotIp && !_apActive) WiFi.reconnect();
 }
 
+String NetworkManager::ipNote() const {
+  char buf[sizeof(_ipNote)];
+  portENTER_CRITICAL(&_hostMux);
+  memcpy(buf, _ipNote, sizeof(buf));
+  portEXIT_CRITICAL(&_hostMux);
+  return String(buf);
+}
+
+void NetworkManager::setIpNote(const String& n) {
+  char buf[sizeof(_ipNote)];
+  strlcpy(buf, n.c_str(), sizeof(buf));
+  portENTER_CRITICAL(&_hostMux);
+  memcpy(_ipNote, buf, sizeof(buf));
+  portEXIT_CRITICAL(&_hostMux);
+}
+
+void NetworkManager::applyStaticIp() {
+  const GatewaySettings& s = gw_config.get();
+  IPAddress ip, mask, gw, dns1, dns2;
+  ip.fromString(s.ipAddr);
+  mask.fromString(s.ipMask);
+  gw.fromString(s.ipGw);
+  if (!s.ipDns1.length() || !dns1.fromString(s.ipDns1)) dns1 = gw;   // Router als DNS
+  if (!s.ipDns2.length() || !dns2.fromString(s.ipDns2)) dns2 = IPAddress(0, 0, 0, 0);
+  _staticActive = WiFi.config(ip, gw, mask, dns1, dns2);
+  Serial.printf("[NET] Feste IP %s/%s, Gateway %s %s\n", s.ipAddr.c_str(), s.ipMask.c_str(), s.ipGw.c_str(),
+                _staticActive ? "gesetzt" : "FEHLER");
+}
+
+void NetworkManager::useDhcp() {
+  WiFi.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0));   // 0 = DHCP
+  _staticActive = false;
+}
+
+// Neue feste IP (E40): erst per DHCP im Netz, dann Adresse prüfen (ARP+Ping),
+// umschalten, Router prüfen. Belegt oder Router unerreichbar -> DHCP bleibt
+// und die feste IP wird verworfen (Grund im Ereignis-Log und im WLAN-Tab).
+void NetworkManager::ipCheckLoop(unsigned long now) {
+  GatewaySettings s = gw_config.get();
+  char detail[48];
+  switch (_ipPhase) {
+    case IpPhase::NONE:
+      return;
+    case IpPhase::WAIT_DHCP: {
+      if (!_gotIp) return;
+      IPAddress ip;
+      ip.fromString(s.ipAddr);
+      if (!net_check::probe(ip)) return;   // andere Prüfung läuft noch
+      event_log::addf("NET", "Feste IP %s: prüfe, ob die Adresse frei ist (aktuell DHCP %s)", s.ipAddr.c_str(),
+                      WiFi.localIP().toString().c_str());
+      _ipPhase = IpPhase::CHECK_ADDR;
+      return;
+    }
+    case IpPhase::CHECK_ADDR: {
+      net_check::State st = net_check::result(detail, sizeof(detail));
+      if (st == net_check::State::RUNNING) return;
+      if (st == net_check::State::PRESENT) {
+        String note = "Feste IP " + s.ipAddr + " ist belegt (" + detail + "), DHCP bleibt aktiv";
+        event_log::add("NET", note.c_str());
+        Serial.println("[NET] " + note);
+        setIpNote(note);
+        GatewayConfig::applyIp(s, "", "", "", "", "", note);   // auf DHCP zurück
+        gw_config.set(s);
+        _ipPhase = IpPhase::NONE;
+        return;
+      }
+      if (st == net_check::State::UNCHECKABLE) {
+        event_log::addf("NET", "Feste IP %s: Belegung nicht prüfbar (%s), setze trotzdem", s.ipAddr.c_str(), detail);
+      }
+      applyStaticIp();
+      _ipPhase = IpPhase::SETTLE;
+      _ipPhaseMs = now;
+      return;
+    }
+    case IpPhase::SETTLE: {
+      if (now - _ipPhaseMs < 3000) return;
+      IPAddress gw;
+      gw.fromString(s.ipGw);
+      if (!net_check::probe(gw)) return;
+      _ipPhase = IpPhase::CHECK_GW;
+      return;
+    }
+    case IpPhase::CHECK_GW: {
+      net_check::State st = net_check::result(detail, sizeof(detail));
+      if (st == net_check::State::RUNNING) return;
+      if (st == net_check::State::PRESENT && _staticActive) {
+        String note = "Feste IP " + s.ipAddr + " aktiv, Router " + s.ipGw + " erreichbar";
+        event_log::add("NET", note.c_str());
+        setIpNote(note);
+        s.ipPendingCheck = false;
+        gw_config.set(s);
+      } else {
+        String note = "Feste IP " + s.ipAddr + ": Router " + s.ipGw + " nicht erreichbar (" + detail +
+                      "), zurück auf DHCP";
+        event_log::add("NET", note.c_str());
+        Serial.println("[NET] " + note);
+        setIpNote(note);
+        useDhcp();
+        GatewayConfig::applyIp(s, "", "", "", "", "", note);
+        gw_config.set(s);
+      }
+      _ipPhase = IpPhase::NONE;
+      return;
+    }
+  }
+}
+
 void NetworkManager::onEvent(WiFiEvent_t event) {
   switch (event) {
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
@@ -151,6 +259,16 @@ void NetworkManager::begin() {
   WiFi.setSleep(false);
   WiFi.setHostname(hostname().c_str());
 
+  // Feste IP (E40): bekannte Adresse sofort, neue erst nach Prüfung
+  if (s.staticIp()) {
+    if (s.ipPendingCheck) {
+      _ipPhase = IpPhase::WAIT_DHCP;
+      Serial.printf("[NET] Neue feste IP %s wird nach dem Verbinden geprüft\n", s.ipAddr.c_str());
+    } else {
+      applyStaticIp();
+    }
+  }
+
   if (s.wifiPendingTest) {
     _checkTimeoutMs = WLAN_TEST_TIMEOUT_MS;
     s.wifiPendingTest = false;
@@ -195,6 +313,7 @@ void NetworkManager::loop() {
   }
 
   if (_gotIp) {
+    ipCheckLoop(now);
     if (!_sntpStarted) {
       // Systemzeit (Epoch) ist immer UTC, so rechnet MeshCore. Die TZ-Regel
       // betrifft nur localtime() fürs OLED. SNTP synchronisiert danach selbst

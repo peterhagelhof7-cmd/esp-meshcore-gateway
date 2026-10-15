@@ -18,4 +18,10 @@ namespace sm_poller {
   bool sendTest(int ruleIdx, String& err);
   // Chiptemperatur des ESP32-S3 in °C (alle 60 s gemessen), NAN = noch keine.
   float chipTempC();
+
+  // Empfangene Kanalnachricht ("Absender: Text") aus dem loopTask. Nur
+  // Antworten "ACK [Nr]" werden an den Poller-Task weitergereicht (E39).
+  void onChannelText(const char* channelName, const char* text);
+  // Offenen Alarm über die Weboberfläche bestätigen.
+  bool ackFromWeb(int id, String& err);
 }
