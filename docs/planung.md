@@ -4,7 +4,7 @@ Stand: 2026-10-14 · Status: **M0–M8 implementiert (0.7.0), Hardware-Test auss
 
 ## Entscheidungen (2026-10-13, vom User bestätigt)
 - **Rolle:** Repeater als Basis + protokollkonformes Kanal-Senden (Details: `entscheidungen.md` E1)
-- **Einbindung:** MeshCore als **Git-Submodul**, gepinnt auf Release-Tag (Start: `repeater-v1.17.1`)
+- **Einbindung:** MeshCore als **Git-Submodul**, gepinnt auf Release-Tag (Start: `repeater-v1.17.1`, seit 2026-10-15 `repeater-v1.18.0`, E37)
 - **Repo:** vorerst **nur lokal** (`C:\Users\Admin\esp-meshcore-gateway`), kein Remote
 - **Platine:** unbekannt (V4 vs. V4-R8) → beim ersten Anschließen per `esptool flash_id`/Chip-Info
   auslesen (PSRAM 2 MB = V4, 8 MB = V4-R8); bis dahin wird für `heltec_v4` geplant
@@ -36,7 +36,7 @@ dafür zwei Varianten (`variants/heltec_v4`, `variants/heltec_v4_r8`). Welche Pl
 muss vor M0 feststehen.
 
 ### MeshCore upstream (github.com/meshcore-dev/MeshCore, MIT)
-- Aktuell: **v1.17.1** (2026-08-14), Releases getrennt je Rolle (`repeater-`, `companion-`, `room-server-`).
+- Aktuell: **v1.18.0** (2026-10-15, vorher v1.17.1 vom 2026-08-14), Releases getrennt je Rolle (`repeater-`, `companion-`, `room-server-`).
 - Build: **PlatformIO + Arduino** (`platformio/espressif32@6.11.0`, RadioLib gepinnt), `library.json` vorhanden.
 - Heltec V4 wird **offiziell unterstützt** (Envs: `heltec_v4_repeater`, `_room_server`,
   `_companion_radio_usb/ble/wifi`, `_sensor`, `_terminal_chat`, `_repeater_bridge_espnow`).

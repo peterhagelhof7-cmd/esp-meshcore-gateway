@@ -655,3 +655,24 @@ Schreiben, kein Gerät gewählt, CDN-Bibliotheken ladbar, Handybreite. Dabei gef
 **Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün, UI-Test 140/140 (neu: Profil ohne
 Regionen, Warnung bei leerem Baum, Profil-Übernahme legt keine Regionen an, von Hand angelegt → Warnung weg, Profil
 bleibt „Alles wie empfohlen“). Live-Check prüft zusätzlich: Gerät hat Regionen, keine Warnung.
+
+## E37 – MeshCore auf repeater-v1.18.0 (2026-10-15, User: „mach 1–4“)
+
+- Submodul `external/MeshCore` von `repeater-v1.17.1` auf `repeater-v1.18.0` (266 Upstream-Commits).
+- **CLI-Umbau upstream:** Funkbefehle (`radio`, `tx`, `dutycycle`, `af`, `txdelay`, `direct.txdelay`, `rxdelay`,
+  `cad`, `int.thresh`, `agc.reset.interval`, `path.hash.mode`, `multi.acks`, `radio.rxgain`) liegen jetzt in
+  `CommonRadioPrefs::handleCommand`. Namen und Antwortformat (`> wert`) unverändert → Profil und Einstellungsseite
+  brauchen keine Änderung. `radio.fem.rxgain` behandelt jetzt `HeltecV4Board::handleCommand`, Wert über den
+  KeyValueStore `fem_rxgain` (abgebildet auf dasselbe Prefs-Feld). `radio.fem.txgain` gibt es für die V4 nicht mehr
+  (nutzen wir nicht). Neu: Befehl `power`.
+- **`src/main.cpp` nachgezogen** (Kopie von simple_repeater): `board.loop()` je Durchlauf, Pufferfix für volle
+  serielle Befehlszeile (vorher wurde `command[159]` = `'\r'` ohne NUL dahinter gesetzt).
+- **Uhr:** `ESP32RTCClock` sichert die Zeit im RTC-RAM und übernimmt sie nach Absturz/WDT; ohne Sicherung Start bei
+  1.3.2026 (vorher 15.5.2024). Unsere Prüfungen `time > 1700000000` (EventLog, OLED) hielten schon den alten Startwert
+  für „gestellt“; unverändert gelassen, Verhalten wie vorher (falsches Datum bis NTP).
+- Automatisch mit drin: keine Antwort auf Nachbarsuche, wenn beide Advert-Intervalle 0 sind (bei uns 240/48),
+  Transport-Code 0 = ohne Scope, ACK-Weiterleitung im Direct-Modus mit Verzögerung, `TXT_TYPE_CLI_COMMAND`,
+  `loop.detect minimal` ist jetzt Upstream-Default.
+
+**Verifikation:** Build V4 + R8 grün (Flash je 20,5 % vom App-Slot), 0 Warnungen, Host-Tests grün, UI-Test 140/140.
+**Offen auf HW:** Profil-Ist/Soll vollständig, `get radio.fem.rxgain` = off nach Update, Kanal-Senden, Nachbarsuche.
