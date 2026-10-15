@@ -217,7 +217,7 @@ Nach dem Einrichten über **Überwachung → Regel → Test** prüfen, ob die Me
 
 | Bereich | Wofür |
 |---|---|
-| **Status** | Knoten, Funk (Rauschpegel, letzte RSSI/SNR), Paketzähler, WLAN, Chiptemperatur, **Nachbarn** |
+| **Status** | Knoten, Funk (Rauschpegel, letzte RSSI/SNR), Paketzähler, WLAN, Chiptemperatur, Heap und PSRAM (mit Tiefststand), **Nachbarn** |
 | **Konsole** | Offizielle MeshCore-CLI (`get …`, `set …`, `neighbors`, `advert`, `region …`). Kritische Befehle (z. B. `erase`) fragen nach. |
 | **Kanäle** | Kanäle anlegen (Hashtag, privat mit Schlüssel aus der App, Public), Nachrichten lesen und senden. Max. 8 Kanäle. |
 | **Überwachung** | Sensormeter im LAN, Regeln mit Grenzwert, Hysterese und Entwarnung; Ping-Ziele; Chiptemperatur als „Gateway (intern)“. Meldungen gehen in den gewählten Kanal, auf Wunsch „aktiv bis bestätigt“ (siehe unten). |
@@ -272,6 +272,8 @@ Host-Präfix und Kanalfilter. „Testwert senden“ prüft die Verbindung (`mesh
   Zabbix-Bereich und im Ereignis-Log.
 - **Wird der Host von einem Proxy überwacht, muss der Empfänger an diesen Proxy senden** (der Server lehnt sonst ab).
 - Ein ACK mit `@[Name]` gilt nur für das Gateway dieses Namens; ohne `@[…]` für alle Gateways im Kanal.
+- Ist die Weiterleitung auf einem Gateway an, das selbst Alarme meldet, gehen auch dessen **eigene** Alarme an
+  Zabbix (Host = eigener Name); das ACK bucht es dann direkt, ohne Funk.
 
 *In Zabbix*: [`docs/zabbix-template-meshcore.yaml`](zabbix-template-meshcore.yaml) importieren (Format 7.0).
 Template **MeshCore Gateway Alarme** je meldendem Gateway (Host ohne Schnittstelle, Name wie oben), Template

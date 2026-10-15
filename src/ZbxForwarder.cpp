@@ -10,6 +10,7 @@
 #include "LogBuffer.h"
 #include "MeshActions.h"
 #include "NetworkManager.h"
+#include "SmPoller.h"
 #include "ZbxFormat.h"
 
 namespace {
@@ -45,6 +46,7 @@ struct Pending {
   bool used = false;
   int8_t channelIdx = -1;
   char sender[32] = {0};
+  char channel[32] = {0};
   uint8_t ack = 0;
   char host[96] = {0};
   char key[32] = {0};
@@ -161,6 +163,21 @@ int sendOne(const Config& c, const char* host, const char* key, const char* valu
   return 0;
 }
 
+// ACK an das meldende Gateway: über Funk "@[Gateway] ACK n". Ist das Gateway
+// dieses Gerät selbst (eigene Meldung, siehe GatewayMesh::sendChannelText),
+// würde es die eigene Funknachricht nie hören -> direkt lokal bestätigen.
+bool sendAck(int channelIdx, const char* channel, const char* sender, uint8_t ack) {
+  char a[64];
+  snprintf(a, sizeof(a), "@[%s] ACK %u", sender, (unsigned)ack);
+  if (!strcasecmp(sender, gateway_status::get().nodeName)) {
+    char t[80];
+    snprintf(t, sizeof(t), "Zabbix: %s", a);
+    sm_poller::onChannelText(channel, t);
+    return true;
+  }
+  return mesh_actions::sendChannel(channelIdx, a, mesh_actions::Origin::ZBX);
+}
+
 String ownRxHost(const Config& c) {
   return c.rxHost[0] ? String(c.rxHost) : network.hostname();
 }
@@ -188,13 +205,9 @@ void accept(const Config& c, const Incoming& in) {
     for (Done& d : s_done) {
       if (d.ms && d.ack == m.ack && !strcmp(d.sender, sender) && now - d.ms < 24UL * 3600000UL) {
         // Wiederholung eines schon an Zabbix gemeldeten Alarms: nur erneut bestätigen
-        if (c.autoAck && now - d.lastAckMs > 60000) {
-          char a[64];
-          snprintf(a, sizeof(a), "@[%s] ACK %u", sender, (unsigned)m.ack);
-          if (mesh_actions::sendChannel(in.channelIdx, a, mesh_actions::Origin::ZBX)) {
-            d.lastAckMs = now;
-            s_st.acks++;
-          }
+        if (c.autoAck && now - d.lastAckMs > 60000 && sendAck(in.channelIdx, in.channel, sender, m.ack)) {
+          d.lastAckMs = now;
+          s_st.acks++;
         }
         return;
       }
@@ -209,6 +222,7 @@ void accept(const Config& c, const Incoming& in) {
   p.used = true;
   p.channelIdx = in.channelIdx;
   strlcpy(p.sender, sender, sizeof(p.sender));
+  strlcpy(p.channel, in.channel, sizeof(p.channel));
   p.firstMs = p.nextMs = now;
 
   char text[TEXT_MAX + 1];
@@ -267,9 +281,7 @@ void process(const Config& c) {
       snprintf(l, sizeof(l), "Zabbix <- %s %s: %.80s", q.host, q.key, q.value);
       logLine('A', l);
       if (q.ack) {
-        char a[64];
-        snprintf(a, sizeof(a), "@[%s] ACK %u", q.sender, (unsigned)q.ack);
-        if (mesh_actions::sendChannel(q.channelIdx, a, mesh_actions::Origin::ZBX)) s_st.acks++;
+        if (sendAck(q.channelIdx, q.channel, q.sender, q.ack)) s_st.acks++;
         int slot = 0;
         for (int k = 1; k < 16; k++) if (s_done[k].ms < s_done[slot].ms) slot = k;
         strlcpy(s_done[slot].sender, q.sender, sizeof(s_done[slot].sender));

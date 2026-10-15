@@ -220,6 +220,8 @@ async function runCli(page, cmd) {
     check('SM: Gateway-intern-Zeile mit Chiptemperatur', devRows.length === 3 && devRows[2][0] === 'Gateway (intern)' &&
           /Chiptemperatur 52\.3°C/.test(devRows[2][3]), JSON.stringify(devRows[2]));
     check('Status: Chiptemperatur angezeigt', (await t('#g_chip')) === '52.3 °C', await t('#g_chip'));
+    check('Status: Heap mit Tiefststand', (await t('#g_heap')) === '176 KB (Tiefststand 146 KB)', await t('#g_heap'));
+    check('Status: PSRAM belegt/gesamt/min', (await t('#g_psram')) === '290 von 2048 KB belegt (14 %, frei min. 1709 KB)', await t('#g_psram'));
     await page.select('#srDev', '100');
     await until(async () => (await page.$$eval('#srPath option', o => o.map(x => x.value))).includes('gateway.chipTemp'));
     await page.select('#srPath', 'gateway.chipTemp');
@@ -384,6 +386,21 @@ async function runCli(page, cmd) {
     check('ZBX-RX: Testwert angenommen', await until(async () => (await t('#zbStat')).includes('OK: heltec-repeater / meshcore.rx.heartbeat angenommen'), 8000), await t('#zbStat'));
     const bkZ = await page.evaluate(async () => (await (await fetch('/api/backup/extra')).json()).zabbix);
     check('ZBX-RX: im Backup', bkZ && bkZ.server === '192.168.1.20' && bkZ.channels === '#test' && bkZ.enabled === true, JSON.stringify(bkZ));
+    // Eigene Alarme dieses Geräts gehen direkt an Zabbix, ACK lokal (kein Funk an sich selbst)
+    await setVal('#zbCh', '');
+    await zbSave();
+    await page.select('#ssZbx', '1');
+    await ssSave();
+    const fwdBefore = (await zbStat()).forwarded;
+    await page.$$eval('#smRuleBody tr', r => r[2].querySelectorAll('button')[1].click());
+    await setVal('#srThr', '44'); await page.click('#srSave');
+    check('ZBX-eigen: eigener Alarm an Zabbix (Host = eigener Name)', await until(async () => (await t('#smLog')).includes('Zabbix <- heltec-repeater meshcore.event')) &&
+      (await zbStat()).forwarded === fwdBefore + 1, (await t('#smLog')).slice(-300));
+    check('ZBX-eigen: lokal bestätigt + Rückmeldung in den Kanal', await until(async () => /sensormeter -> ACK \d+ bestätigt \(Zabbix\)/.test(await t('#smLog')) &&
+      await page.$eval('#ackSec', e => e.hidden)), (await t('#smLog')).slice(-300));
+    check('ZBX-eigen: kein Funk-ACK an sich selbst', !(await t('#smLog')).includes('-> @[Heltec Repeater] ACK'));
+    await page.select('#ssZbx', '0');
+    await ssSave();
     await page.screenshot({ path: out + '/13_zabbix.png', fullPage: true });
     await page.$eval('#zbEn', e => { e.checked = false; e.dispatchEvent(new Event('input')); });
     await setVal('#zbCh', '');
