@@ -675,4 +675,6 @@ bleibt „Alles wie empfohlen“). Live-Check prüft zusätzlich: Gerät hat Reg
   `loop.detect minimal` ist jetzt Upstream-Default.
 
 **Verifikation:** Build V4 + R8 grün (Flash je 20,5 % vom App-Slot), 0 Warnungen, Host-Tests grün, UI-Test 140/140.
-**Offen auf HW:** Profil-Ist/Soll vollständig, `get radio.fem.rxgain` = off nach Update, Kanal-Senden, Nachbarsuche.
+**HW 2026-10-15 (OTA auf .151, app1, Image gültig nach 60 s):** alle 19 Profilwerte vor/nach identisch
+(inkl. `radio.fem.rxgain` = off, Migration ok), `ver` = v1.18.0, `power` neu verfügbar, Live-Check bestanden,
+Nachbarsuche nach Start findet B0A23599 (SNR 12 dB), Kanalnachricht auf Public gesendet.
