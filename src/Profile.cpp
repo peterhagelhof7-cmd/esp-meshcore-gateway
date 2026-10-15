@@ -3,7 +3,8 @@
 // Quellen: hansemesh.de/anleitungen/repeater-checkliste/,
 //          hansemesh.de/anleitungen/einstellungen-deutschland/,
 //          hansemesh.de/anleitungen/heltec-v3-v4/
-// Befehlsnamen gegen MeshCore 1.17.1 (CommonCLI.cpp) geprüft. hansemesh nennt
+// Befehlsnamen gegen MeshCore 1.18.0 (CommonCLI.cpp, CommonRadioPrefs.cpp,
+// HeltecV4Board.cpp) geprüft. hansemesh nennt
 // teils andere Namen (advert.interval.zero/.flood), siehe E15.
 //
 // Regionen gehören bewusst NICHT ins Profil (E36): sie hängen vom Standort ab
