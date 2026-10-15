@@ -127,6 +127,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <dt>Hostname</dt><dd id="w_host">–</dd>
 <dt>MAC</dt><dd class="mono" id="w_mac">–</dd>
 <dt>Freier Heap</dt><dd id="g_heap">–</dd>
+<dt>PSRAM</dt><dd id="g_psram">–</dd>
 <dt>Chiptemperatur</dt><dd id="g_chip" title="Temperatur im ESP32-S3, nicht die Raumtemperatur">–</dd>
 </dl>
 </section>
@@ -499,7 +500,9 @@ async function refresh(){
     const modes={station:'Verbunden',installer_ap:'Installer-AP',connecting:'Verbinde …'};
     set('w_mode',modes[w.mode]||w.mode);set('w_ssid',w.ssid);set('w_ip',w.ip);
     set('w_rssi',w.rssi?w.rssi+' dBm':null);set('w_host',w.hostname+(w.hostname_auto?' (wie Gerätename)':''));set('w_mac',w.mac);
-    set('g_heap',Math.round(j.gateway.free_heap/1024)+' KB');
+    const gw=j.gateway,kb=b=>Math.round(b/1024);
+    set('g_heap',kb(gw.free_heap)+' KB'+(gw.min_free_heap?' (Tiefststand '+kb(gw.min_free_heap)+' KB)':''));
+    set('g_psram',gw.psram_total?kb(gw.psram_total-gw.psram_free)+' von '+kb(gw.psram_total)+' KB belegt ('+Math.round(100*(gw.psram_total-gw.psram_free)/gw.psram_total)+' %, frei min. '+kb(gw.psram_min_free)+' KB)':null);
     set('g_chip',typeof j.gateway.chip_temp_c==='number'?j.gateway.chip_temp_c.toFixed(1)+' °C':null);
     set('fw_ver',j.gateway.version+' (MeshCore '+n.firmware+')');set('fw_proj',j.gateway.project);
     set('fw_part',j.gateway.partition+' · '+j.gateway.image_state);

@@ -469,6 +469,7 @@ class FakeSm:
             self.sent += 1
         push('smlog', 'A', '%s -> %s' % (c['name'], text))
         push('messages', 'S', '\t'.join([str(ch), c['name'], '', '0', cli.p['name'] + ': ' + text]))
+        zbxm.on_text(ch, c['name'], cli.p['name'] + ': ' + text)   # eigene Meldungen (wie GatewayMesh::sendChannelText)
 
     @staticmethod
     def render(tpl, dev, path, val, op, thr, state):
@@ -730,8 +731,11 @@ class FakeZbx:
                 push('smlog', 'A', 'Zabbix <- %s %s: %s' % (it['host'], it['key'], it['value'][:80]))
                 if it['ack']:
                     a = '@[%s] ACK %d' % (it['sender'], it['ack'])
-                    push('messages', 'S', '\t'.join([str(it['ch']), it['chname'], '', '0', cli.p['name'] + ': ' + a]))
-                    push('smlog', 'A', '%s -> %s' % (it['chname'], a))
+                    if it['sender'].lower() == cli.p['name'].lower():   # eigene Meldung: lokal bestätigen
+                        smm.on_channel_text(it['chname'], 'Zabbix: ' + a)
+                    else:
+                        push('messages', 'S', '\t'.join([str(it['ch']), it['chname'], '', '0', cli.p['name'] + ': ' + a]))
+                        push('smlog', 'A', '%s -> %s' % (it['chname'], a))
                     self.st['acks'] += 1
             elif r == 0:
                 self.st['rejected'] += 1; self.st['lastError'] = err; push('smlog', 'X', 'Zabbix: ' + err)
@@ -830,7 +834,8 @@ class H(BaseHTTPRequestHandler):
         if u.path == '/api/status':
             p = cli.p
             return self.send_json({'gateway': {'version': GW_VERSION, 'uptime_ms': 1000, 'free_heap': 180000, 'cpu_mhz': 240, 'chip_temp_c': CHIP_TEMP,
-                                   'project': GW_PROJECT, 'partition': 'app0', 'image_state': 'gültig'},
+                                   'project': GW_PROJECT, 'partition': 'app0', 'image_state': 'gültig',
+                                   'min_free_heap': 150000, 'psram_total': 2097152, 'psram_free': 1800000, 'psram_min_free': 1750000},
               'node': {'name': p['name'], 'pubkey': 'ab' * 32, 'role': 'repeater', 'firmware': 'v1.18.0', 'build_date': '15 Oct 2026',
                        'lat': p['lat'], 'lon': p['lon'], 'forwarding': p['repeat'] == 'on'},
               'radio': {'freq': p['freq'], 'bw': p['bw'], 'sf': p['sf'], 'cr': p['cr'], 'tx_power': p['tx']},

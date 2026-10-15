@@ -88,6 +88,15 @@ static void handleStatus(AsyncWebServerRequest* req) {
   j += String(millis());
   j += ",\"free_heap\":";
   j += String(ESP.getFreeHeap());
+  // Tiefststand seit dem Start und PSRAM (Dauerlauf-Beobachtung)
+  j += ",\"min_free_heap\":";
+  j += String(ESP.getMinFreeHeap());
+  j += ",\"psram_total\":";
+  j += String(ESP.getPsramSize());
+  j += ",\"psram_free\":";
+  j += String(ESP.getFreePsram());
+  j += ",\"psram_min_free\":";
+  j += String(ESP.getMinFreePsram());
   j += ",\"cpu_mhz\":";
   j += String(getCpuFrequencyMhz());
   float chip = sm_poller::chipTempC();

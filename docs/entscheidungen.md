@@ -785,3 +785,16 @@ im Zabbix-Kanal; Empfänger: ohne Server abgelehnt, Zabbix offline → wartet oh
 Ablehnung ohne ACK, ohne Kennung ignoriert, Kanalfilter, Testwert, Backup). Template: YAML gültig, JS-Vorverarbeitung
 und Trigger-Regexe gegen Beispielmeldungen geprüft. **Nicht getestet:** echter Zabbix-Import, echter Trapper-Versand
 (Mock simuliert Zabbix), Funkstrecke Gateway → Empfänger.
+
+**Nachtrag E41 (2026-10-16, User: „einbauen dass der Node auch seine eigenen Meldungen sieht“):** Ein Knoten hört
+seine eigenen Funknachrichten nicht. `GatewayMesh::sendChannelText` reicht daher jede gesendete Kanalnachricht
+zusätzlich an `zbx_fwd::onChannelText` – ein Gerät, das selbst die Zabbix-Weiterleitung macht, meldet so auch die
+eigenen Alarme (Host = eigener Name). Das ACK für eigene Meldungen geht nicht über Funk („@[ich] ACK n“ käme nie
+an), sondern lokal an den Poller (`sm_poller::onChannelText("Zabbix: @[ich] ACK n")`); die Rückmeldung
+„ACK n bestätigt (Zabbix)“ geht wie gewohnt in den Kanal. UI-Test 203/203.
+
+**PSRAM-Anzeige (2026-10-16, User):** Status → Gateway zeigt freien Heap mit Tiefststand seit Start
+(`ESP.getMinFreeHeap`) und PSRAM belegt/gesamt mit kleinstem freien Wert (`getPsramSize/getFreePsram/
+getMinFreePsram`), API `/api/status` Felder `min_free_heap`, `psram_total`, `psram_free`, `psram_min_free`. Für den
+Dauerlauf: Tiefststände zeigen Lecks/Spitzen, ohne ständig hinzusehen. Schätzung 0.8.0 ca. 277 KB, 0.9.0 ca. 290 KB
+fest belegt (Live-Logs ~199 KB, CLI-Aufträge 56 KB, Ereignis-Log 8 KB, Überwachung ~14 KB, Zabbix ~12 KB, ACK ~2 KB).

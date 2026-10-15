@@ -182,5 +182,11 @@ bool GatewayMesh::sendChannelText(int channelIdx, const char* text, char* err, s
   for (char* p = shown; *p; p++) if (*p == '\t' || *p == '\n' || *p == '\r') *p = ' ';
   snprintf(line, sizeof(line), "%d\t%s\t\t0\t%s: %s", channelIdx, c.name, getNodeName(), shown);
   channel_log.push('S', timestamp, line);
+  // Eigene Nachrichten hört der Knoten nicht über Funk. Damit ein Gerät, das
+  // selbst die Zabbix-Weiterleitung macht, auch seine eigenen Alarme meldet,
+  // bekommt sie die Weiterleitung hier direkt (E41).
+  char own[MAX_TEXT_LEN + 40];
+  snprintf(own, sizeof(own), "%s: %s", getNodeName(), shown);
+  zbx_fwd::onChannelText(channelIdx, c.name, own, 0, 0);
   return true;
 }
