@@ -99,3 +99,12 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 - [ ] Danach Neustart ohne Prüfung (feste IP sofort), NTP/Sensormeter-Abfrage/Ping-Check laufen
 - [ ] Falschen Router eintragen (z. B. .253, im Subnetz, nicht vorhanden) → nach Neustart zurück auf DHCP, Grund im WLAN-Tab und Log
 - [ ] Haken weg → wieder DHCP
+
+## 12. Zabbix-Anbindung (E41, 0.9.0) – braucht zweites Gerät + Zabbix
+- [ ] Template `docs/zabbix-template-meshcore.yaml` importieren (Fehler beim Import notieren), Host `<gateway-hostname>` mit „MeshCore Gateway Alarme“, Empfänger-Host mit „MeshCore Zabbix-Empfaenger“, beide am richtigen Proxy
+- [ ] Empfänger: Zabbix-Weiterleitung an, Proxy eintragen, „Testwert senden“ → OK, in Zabbix `meshcore.rx.heartbeat` Latest data
+- [ ] Gateway: Kennung „im Alarmtext“, Regel mit „aktiv bis bestätigt“ auslösen → App zeigt Text mit `#Z1;…`, Empfänger-Status „An Zabbix übergeben 1“, Zabbix-Problem mit Alarmtext, App zeigt `@[Gateway] ACK n` vom Empfänger, Gateway `ACK n bestätigt (Empfänger)`, keine Wiederholung
+- [ ] Entwarnung → Zabbix-Problem geschlossen
+- [ ] Zabbix-Proxy stoppen → Alarm: kein ACK, Gateway wiederholt nach 5 min; Proxy starten → Empfänger liefert nach (≤ 30 s), ACK
+- [ ] Host in Zabbix umbenennen → Empfänger zeigt „abgelehnt“, kein ACK
+- [ ] Modus „eigener Zabbix-Kanal“: Alarmkanal ohne Kennung, Zabbix-Kanal mit; Empfänger-Kanalfilter auf Zabbix-Kanal

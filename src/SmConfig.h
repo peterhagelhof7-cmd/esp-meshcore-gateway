@@ -72,7 +72,13 @@ struct Settings {
   char onlineText[100];
   char pingDownText[100];
   char pingUpText[100];
+  // Zabbix-Kennung (E41): 0 = aus, 1 = im Alarmtext, 2 = zusätzlich in eigenem Kanal
+  uint8_t zbxMode;
+  char zbxChannel[32];        // nur Modus 2
+  uint8_t heartbeatH;         // Lebenszeichen alle N Stunden, 0 = aus (nur mit Kennung)
 };
+
+static const uint8_t ZBX_OFF = 0, ZBX_APPEND = 1, ZBX_CHANNEL = 2;
 
 struct Config {
   Settings settings;

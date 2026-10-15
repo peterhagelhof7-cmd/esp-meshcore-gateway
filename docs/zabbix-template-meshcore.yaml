@@ -1,0 +1,243 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: 234c2481868f45c3b6ab532965cde240
+      name: 'IoT MeshCore'
+  templates:
+    - uuid: 22f85691dc814c75b2b6006ac96ba5a3
+      template: 'MeshCore Gateway Alarme'
+      name: 'MeshCore Gateway Alarme'
+      description: |
+        Alarme eines MeshCore-Gateways (esp-meshcore-gateway, E41), die ein
+        zweites Gateway als "Zabbix-Empfaenger" aus dem Mesh holt und per
+        Trapper (Zabbix-Sender-Protokoll) einliefert.
+
+        Ein Host je Gateway. Host-Name = Gateway-Name wie dessen WLAN-Hostname
+        (Kleinbuchstaben, Leerzeichen/Unterstrich -> Bindestrich), z. B.
+        Geraetename "DE-BY-ORT01-GW" -> Host "de-by-ort01-gw", ggf. mit dem im
+        Empfaenger eingestellten Praefix davor.
+
+        Jede Meldung kommt als JSON in meshcore.event an:
+        {"src":"R3fa2","ev":"A","state":"ALARM","value":31,"ack":3,"text":"...","gw":"...","channel":"...","snr":7.5,"hops":2,"rx":"..."}
+        src = Alarmquelle (Regel R, Ping-Ziel P, Geraet offline D, Gateway G);
+        Trigger "MeshCore-Alarm": ein Problem je Alarm, die Entwarnung derselben
+        Quelle schliesst es (Tag src). Die Discovery legt je Quelle zusaetzlich
+        Zustand/Text/Wert als Items an (Verlauf, Graphen).
+
+        Vor dem Einsatz:
+        1. Template importieren, Host mit obigem Namen anlegen (keine Schnittstelle noetig),
+           bei Proxy-Ueberwachung den Proxy setzen, an den der Empfaenger sendet
+        2. Optional {$MESH_RX_ALLOWED} auf die IP des Empfaengers setzen
+        3. Sendet das Gateway Lebenszeichen, den Trigger "Kein Lebenszeichen" aktivieren
+           und {$MESH_HB_MAX} auf ca. 2-3 x Intervall setzen
+      groups:
+        - name: 'IoT MeshCore'
+      macros:
+        - macro: '{$MESH_RX_ALLOWED}'
+          value: ''
+          description: 'Allowed hosts der Trapper-Items (IP des Zabbix-Empfaengers), leer = alle'
+        - macro: '{$MESH_HB_MAX}'
+          value: 4h
+          description: 'Ohne Lebenszeichen so lange -> Problem (nur wenn am Gateway Lebenszeichen eingestellt)'
+      items:
+        - uuid: b6a970c21d3d4a3697ef2ad4f50e63ed
+          name: 'Mesh: Meldung (roh)'
+          type: TRAP
+          key: meshcore.event
+          value_type: TEXT
+          trends: '0'
+          history: 30d
+          allowed_hosts: '{$MESH_RX_ALLOWED}'
+          description: 'Jede weitergeleitete Meldung des Gateways als JSON (Master-Item).'
+          tags:
+            - tag: component
+              value: mesh
+          triggers:
+            - uuid: 77bdd9708ac64faa97efd155af54c44b
+              expression: 'find(/MeshCore Gateway Alarme/meshcore.event,,"regexp","\"ev\":\"[AF]\"")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'find(/MeshCore Gateway Alarme/meshcore.event,,"regexp","\"state\":\"OK\"")=1'
+              correlation_mode: TAG_VALUE
+              correlation_tag: src
+              name: 'MeshCore-Alarm auf {HOST.NAME}'
+              event_name: '{{ITEM.VALUE}.regsub("\"text\":\"([^\"]*)\"", "\1")}'
+              opdata: 'Quelle {{ITEM.VALUE}.regsub("\"src\":\"([^\"]+)\"", "\1")}'
+              type: MULTIPLE
+              priority: HIGH
+              manual_close: 'YES'
+              description: |
+                Ein Problem je Alarm (Ereignis A = Grenzwert/Ping, F = Geraet offline), Name = Alarmtext.
+                Die Entwarnung (state OK) derselben Quelle schliesst es (Tag src). Wiederholungen (W) und
+                Erinnerungen (E) erzeugen kein neues Problem. Funktioniert ohne Discovery, also auch beim
+                allerersten Alarm einer neuen Quelle.
+              tags:
+                - tag: src
+                  value: '{{ITEM.VALUE}.regsub("\"src\":\"([^\"]+)\"", "\1")}'
+                - tag: gateway
+                  value: '{HOST.NAME}'
+        - uuid: 445e46d637b641e393bf193200371290
+          name: 'Mesh: letzte Meldung'
+          type: DEPENDENT
+          key: meshcore.text
+          value_type: TEXT
+          trends: '0'
+          history: 30d
+          master_item:
+            key: meshcore.event
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.text
+          tags:
+            - tag: component
+              value: mesh
+        - uuid: ab06fe2383264abfacde5026b6ff7bf2
+          name: 'Mesh: Lebenszeichen (Laufzeit)'
+          type: DEPENDENT
+          key: meshcore.heartbeat
+          value_type: FLOAT
+          units: h
+          master_item:
+            key: meshcore.event
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var v = JSON.parse(value);
+                  if (v.ev !== 'H') throw 'kein Lebenszeichen';
+                  return v.value;
+              error_handler: DISCARD_VALUE
+          tags:
+            - tag: component
+              value: mesh
+          triggers:
+            - uuid: cb990924e6654f629bcd7a05e7598a46
+              expression: 'nodata(/MeshCore Gateway Alarme/meshcore.heartbeat,{$MESH_HB_MAX})=1'
+              name: 'MeshCore: kein Lebenszeichen von {HOST.NAME} seit {$MESH_HB_MAX}'
+              priority: WARNING
+              status: DISABLED
+              description: 'Gateway oder Funkstrecke zum Empfaenger ausgefallen. Nur aktivieren, wenn am Gateway "Lebenszeichen alle ... Stunden" eingestellt ist.'
+            - uuid: 9b2dfeba8bbe4b15b0aa584532544db1
+              expression: 'change(/MeshCore Gateway Alarme/meshcore.heartbeat)<0'
+              name: 'MeshCore: {HOST.NAME} wurde neu gestartet'
+              priority: INFO
+              manual_close: 'YES'
+      discovery_rules:
+        - uuid: 3c8b2f5038264d588c80c4e610713d4c
+          name: 'Mesh: Alarmquellen'
+          type: DEPENDENT
+          key: meshcore.src.discovery
+          lifetime: 30d
+          master_item:
+            key: meshcore.event
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var v = JSON.parse(value);
+                  if (!v.src || v.ev === 'H') throw 'keine Alarmquelle';
+                  return JSON.stringify([{'{#SRC}': v.src}]);
+              error_handler: DISCARD_VALUE
+          item_prototypes:
+            - uuid: e9aebf6dbce1455789d3512c62cf5052
+              name: 'Mesh {#SRC}: Zustand'
+              type: DEPENDENT
+              key: 'meshcore.state[{#SRC}]'
+              value_type: CHAR
+              trends: '0'
+              master_item:
+                key: meshcore.event
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var v = JSON.parse(value);
+                      if (v.src !== '{#SRC}' || v.state === 'INFO') throw 'andere Quelle';
+                      return v.state;
+                  error_handler: DISCARD_VALUE
+              tags:
+                - tag: component
+                  value: mesh
+                - tag: source
+                  value: '{#SRC}'
+            - uuid: ce7558aa7f2046889be619c94f145e5a
+              name: 'Mesh {#SRC}: Text'
+              type: DEPENDENT
+              key: 'meshcore.text[{#SRC}]'
+              value_type: TEXT
+              trends: '0'
+              master_item:
+                key: meshcore.event
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var v = JSON.parse(value);
+                      if (v.src !== '{#SRC}') throw 'andere Quelle';
+                      return v.text;
+                  error_handler: DISCARD_VALUE
+              tags:
+                - tag: component
+                  value: mesh
+                - tag: source
+                  value: '{#SRC}'
+            - uuid: 4108a47679e64629825aef065137f237
+              name: 'Mesh {#SRC}: Wert'
+              type: DEPENDENT
+              key: 'meshcore.value[{#SRC}]'
+              value_type: FLOAT
+              master_item:
+                key: meshcore.event
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var v = JSON.parse(value);
+                      if (v.src !== '{#SRC}' || v.value === undefined) throw 'kein Wert';
+                      return v.value;
+                  error_handler: DISCARD_VALUE
+              tags:
+                - tag: component
+                  value: mesh
+                - tag: source
+                  value: '{#SRC}'
+    - uuid: 3ed885e2576c46c699773216388a9b75
+      template: 'MeshCore Zabbix-Empfaenger'
+      name: 'MeshCore Zabbix-Empfaenger'
+      description: |
+        Das Gateway, das die Mesh-Alarme an Zabbix weiterleitet (Funktion
+        "Zabbix-Weiterleitung"). Host-Name = "Eigener Zabbix-Host" aus der
+        Weboberflaeche (Standard: dessen WLAN-Hostname).
+      groups:
+        - name: 'IoT MeshCore'
+      macros:
+        - macro: '{$MESH_RX_NODATA}'
+          value: 15m
+          description: 'Kein Lebenszeichen des Empfaengers so lange -> Problem (Standard-Intervall 5 min)'
+      items:
+        - uuid: 4e54975d4c73463db789c093788b3630
+          name: 'Empfaenger: Laufzeit'
+          type: TRAP
+          key: meshcore.rx.heartbeat
+          units: s
+          description: 'Lebenszeichen des Empfaengers (Laufzeit in Sekunden).'
+          tags:
+            - tag: component
+              value: mesh
+          triggers:
+            - uuid: fe481b2d02fd4c838984a0e26b4cdd03
+              expression: 'nodata(/MeshCore Zabbix-Empfaenger/meshcore.rx.heartbeat,{$MESH_RX_NODATA})=1'
+              name: 'MeshCore-Empfaenger {HOST.NAME} meldet sich nicht'
+              priority: HIGH
+              description: 'Ohne Empfaenger kommen keine Mesh-Alarme in Zabbix an (die Gateways wiederholen dann bis zu 3x und hoeren auf).'
+        - uuid: 8125fa73703247399f46b13a22f87c50
+          name: 'Empfaenger: Nachricht ohne Kennung'
+          type: TRAP
+          key: meshcore.rx.unparsed
+          value_type: TEXT
+          trends: '0'
+          history: 7d
+          description: 'Nur wenn "auch Nachrichten ohne Kennung weiterleiten" eingeschaltet ist.'
+          tags:
+            - tag: component
+              value: mesh

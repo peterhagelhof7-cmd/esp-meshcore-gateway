@@ -273,6 +273,11 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <label for="ssOnT">Text wieder Online</label><input id="ssOnT" maxlength="99" spellcheck="false">
 <label for="ssPgD">Text Ping-Alarm</label><input id="ssPgD" maxlength="99" spellcheck="false">
 <label for="ssPgU">Text Ping wieder OK</label><input id="ssPgU" maxlength="99" spellcheck="false">
+<label for="ssZbx">Zabbix-Kennung</label>
+<select id="ssZbx"><option value="0">aus</option><option value="1">im Alarmtext anhängen</option><option value="2">zusätzlich in eigenem Zabbix-Kanal</option></select>
+<div id="ssZbxChBox" hidden><label for="ssZbxCh">Zabbix-Kanal</label><select id="ssZbxCh"></select></div>
+<div id="ssHbBox" hidden><label for="ssHb">Lebenszeichen alle … Stunden (0 = aus)</label><input id="ssHb" type="number" min="0" max="24"></div>
+<p class="hint" id="ssZbxHint" hidden>Hängt an jede Meldung eine kurze Kennung wie <code>#Z1;R3fa2;A;31;3</code> (Quelle, Ereignis, Wert, ACK-Nr) für einen Zabbix-Empfänger an. Im eigenen Kanal bleibt der Alarmtext für Menschen sauber, dafür kostet jede Meldung doppelt Airtime (zählt beides zum Limit). Ein ACK im Zabbix-Kanal gilt wie eines im Alarmkanal.</p>
 <div class="row"><button type="button" id="ssSave">Einstellungen speichern</button><span class="msg" id="ssMsg" style="margin:0"></span></div>
 <p class="hint" id="ssLimit"></p>
 </section>
@@ -282,6 +287,22 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <p class="hint">Jede Meldung ist eine Kanalnachricht (Flood) und kostet Airtime. Der Knotenname wird automatisch vorangestellt.</p>
 </section>
 </div>
+
+<section style="margin-top:16px">
+<h2>Zabbix-Weiterleitung (Empfänger)</h2>
+<p class="hint" style="margin-top:0">Für ein Gerät beim Zabbix-Proxy: empfangene Alarme anderer Gateways mit Zabbix-Kennung gehen per Trapper (Zabbix-Sender-Protokoll) an Zabbix, Host = Präfix + Gateway-Name (wie dessen WLAN-Hostname), Key <code>meshcore.event</code>. Erst wenn Zabbix den Wert angenommen hat, antwortet dieses Gerät im Kanal mit <code>@[Gateway] ACK n</code>.</p>
+<div class="form">
+<label>Aktiv</label><div class="fld"><label class="chk"><input type="checkbox" id="zbEn"> Zabbix-Weiterleitung einschalten</label></div>
+<label for="zbSrv">Zabbix-Proxy/-Server</label><div class="fld"><div class="radio4" style="grid-template-columns:3fr 1fr"><input id="zbSrv" maxlength="63" placeholder="192.168.178.20" spellcheck="false"><input id="zbPort" type="number" min="1" max="65535" value="10051"></div><small>Bei Hosts, die ein Proxy überwacht, MUSS es dieser Proxy sein (Server lehnt sonst ab)</small></div>
+<label for="zbPre">Host-Präfix</label><div class="fld"><input id="zbPre" maxlength="23" spellcheck="false" placeholder="leer"><small>z. B. <code>mesh-</code> → Host <code>mesh-de-by-ort01-gw</code></small></div>
+<label for="zbCh">Kanäle</label><div class="fld"><input id="zbCh" maxlength="95" spellcheck="false" placeholder="leer = alle"><small>Kanalnamen mit Komma, z. B. <code>sps-alarm, zbx</code></small></div>
+<label for="zbRx">Eigener Zabbix-Host</label><div class="fld"><input id="zbRx" maxlength="63" spellcheck="false"><small>für das eigene Lebenszeichen (<code>meshcore.rx.heartbeat</code>), leer = eigener Hostname</small></div>
+<label for="zbHb">Lebenszeichen alle (min)</label><div class="fld"><input id="zbHb" type="number" min="0" max="120" value="5"></div>
+<label>Optionen</label><div class="fld"><label class="chk"><input type="checkbox" id="zbAck" checked> ACK senden, sobald Zabbix angenommen hat</label><label class="chk"><input type="checkbox" id="zbUnm"> auch Nachrichten ohne Kennung weiterleiten (<code>meshcore.rx.unparsed</code> am eigenen Host)</label></div>
+</div>
+<div class="row"><button type="button" id="zbSave">Speichern</button><button type="button" class="sec" id="zbTest">Testwert senden</button><span class="msg" id="zbMsg" style="margin:0"></span></div>
+<dl id="zbStat" style="margin-top:12px"></dl>
+</section>
 </div>
 
 <div class="view" id="v_settings">
@@ -442,7 +463,7 @@ function show(v){
   if(v==='settings')openSettings();
   if(v==='status'){lastNb=Date.now();loadNeighbors()}
   if(v==='channels')loadChannels();
-  if(v==='sm')smLoad();
+  if(v==='sm'){smLoad();zbLoad()}
   if(v==='wifi')lgLoad();
   tick();
 }
@@ -811,6 +832,7 @@ function fillRuleChannels(){
   if(!smCfg)return;
   fillChSelect($('srCh'),'Alarmkanal (Standard)',$('srCh').value||'');
   fillChSelect($('ssCh'),'(keiner – Meldungen gehen verloren)',smSetDirty?$('ssCh').value:smCfg.settings.defaultChannel);
+  fillChSelect($('ssZbxCh'),'– wählen –',smSetDirty?$('ssZbxCh').value:(smCfg.settings.zbxChannel||''));
 }
 function ago(s){if(s===null||s===undefined)return'–';if(s<90)return s+' s';if(s<5400)return Math.round(s/60)+' min';return Math.round(s/3600)+' h'}
 function fmtVal(v){return (Math.round(v*10)/10).toString()}
@@ -934,6 +956,7 @@ async function smLoad(){
       $('ssEn').checked=s.enabled;$('ssMax').value=s.maxPerHour;$('ssOff').value=s.offlineAfterFails;
       $('ssAlert').value=s.alertText;$('ssRec').value=s.recoverText;$('ssOffT').value=s.offlineText;$('ssOnT').value=s.onlineText;
       $('ssPgD').value=s.pingDownText||'';$('ssPgU').value=s.pingUpText||'';
+      $('ssZbx').value=String(s.zbxMode||0);$('ssHb').value=s.heartbeatH||0;zbxModeUi();
     }
     fillRuleChannels();smRender();
   }catch(e){$('sdMsg').textContent='Laden fehlgeschlagen';$('sdMsg').className='msg bad'}
@@ -941,12 +964,15 @@ async function smLoad(){
 $('ssAlert').placeholder=SM_DEF.alert;$('ssRec').placeholder=SM_DEF.recover;$('ssOffT').placeholder=SM_DEF.offline;$('ssOnT').placeholder=SM_DEF.online;$('ssPgD').placeholder=SM_DEF.pingDown;$('ssPgU').placeholder=SM_DEF.pingUp;
 $('srText').placeholder='Standard: '+SM_DEF.alert;
 let smSetDirty=false;
-['ssEn','ssCh','ssMax','ssOff','ssAlert','ssRec','ssOffT','ssOnT','ssPgD','ssPgU'].forEach(id=>$(id).addEventListener('input',()=>{smSetDirty=true;$('ssMsg').textContent='ungespeichert';$('ssMsg').className='msg warn'}));
+function zbxModeUi(){const m=$('ssZbx').value;$('ssZbxChBox').hidden=m!=='2';$('ssHbBox').hidden=$('ssZbxHint').hidden=m==='0'}
+$('ssZbx').addEventListener('change',zbxModeUi);
+['ssEn','ssCh','ssMax','ssOff','ssAlert','ssRec','ssOffT','ssOnT','ssPgD','ssPgU','ssZbx','ssZbxCh','ssHb'].forEach(id=>$(id).addEventListener('input',()=>{smSetDirty=true;$('ssMsg').textContent='ungespeichert';$('ssMsg').className='msg warn'}));
 $('ssSave').onclick=async()=>{
   const c=smCfgForSave();
   Object.assign(c.settings,{enabled:$('ssEn').checked,defaultChannel:$('ssCh').value,maxPerHour:parseInt($('ssMax').value)||0,
     offlineAfterFails:parseInt($('ssOff').value)||0,alertText:$('ssAlert').value.trim(),recoverText:$('ssRec').value.trim(),
-    offlineText:$('ssOffT').value.trim(),onlineText:$('ssOnT').value.trim(),pingDownText:$('ssPgD').value.trim(),pingUpText:$('ssPgU').value.trim()});
+    offlineText:$('ssOffT').value.trim(),onlineText:$('ssOnT').value.trim(),pingDownText:$('ssPgD').value.trim(),pingUpText:$('ssPgU').value.trim(),
+    zbxMode:parseInt($('ssZbx').value)||0,zbxChannel:$('ssZbx').value==='2'?$('ssZbxCh').value:'',heartbeatH:parseInt($('ssHb').value)||0});
   smSetDirty=false;
   if(!await smSave(c,$('ssMsg'),'Gespeichert'))smSetDirty=true;
 };
@@ -1031,6 +1057,41 @@ $('pgSave').onclick=async()=>{
   const c=smCfgForSave();c.pings=c.pings||[];
   if(pgEdit>=0)c.pings[pgEdit]=p;else{if(c.pings.length>=5){$('pgMsg').textContent='Maximal 5 Ping-Ziele';$('pgMsg').className='msg bad';return}c.pings.push(p)}
   if(await smSave(c,$('pgMsg'),pgEdit>=0?'Ping-Ziel gespeichert':'Ping-Ziel angelegt'))pgReset();
+};
+
+/* ---------- Zabbix-Weiterleitung (E41) ---------- */
+let zbDirty=false;
+['zbEn','zbSrv','zbPort','zbPre','zbCh','zbRx','zbHb','zbAck','zbUnm'].forEach(id=>$(id).addEventListener('input',()=>{zbDirty=true;$('zbMsg').textContent='ungespeichert';$('zbMsg').className='msg warn'}));
+async function zbLoad(){
+  try{
+    const j=await (await fetch('/api/zbx',{cache:'no-store'})).json();
+    const c=j.config,s=j.status;
+    if(!zbDirty){$('zbEn').checked=c.enabled;$('zbSrv').value=c.server;$('zbPort').value=c.port;$('zbPre').value=c.hostPrefix;
+      $('zbCh').value=c.channels;$('zbRx').value=c.rxHost;$('zbRx').placeholder=s.rxHost;$('zbHb').value=c.heartbeatMin;$('zbAck').checked=c.autoAck;$('zbUnm').checked=c.forwardUnmarked}
+    const rows=[['Empfangen',s.received],['An Zabbix übergeben',s.forwarded+(s.lastOkAgoS!==null?' (zuletzt vor '+ago(s.lastOkAgoS)+')':'')],
+      ['ACK gesendet',s.acks],['Abgelehnt',s.rejected],['Wartend',s.pending],['Verbindungsfehler',s.errors],['Verworfen',s.dropped],
+      ['Lebenszeichen',s.heartbeatAgoS!==null?'angenommen vor '+ago(s.heartbeatAgoS)+' ('+s.rxHost+')':'–'],
+      ['Letzter Fehler',s.lastError||'–'],['Test',s.lastTest||'–']];
+    $('zbStat').innerHTML='';
+    rows.forEach(([k,v])=>{const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=k;dd.textContent=String(v);
+      if(k==='Letzter Fehler'&&s.lastError)dd.className='bad';if(k==='Test'&&s.lastTest)dd.className=s.lastTest.startsWith('OK')?'ok':'bad';
+      $('zbStat').append(dt,dd)});
+    $('zbStat').hidden=!c.enabled;
+  }catch(e){}
+}
+$('zbSave').onclick=async()=>{
+  const c={enabled:$('zbEn').checked,server:$('zbSrv').value.trim(),port:parseInt($('zbPort').value)||10051,hostPrefix:$('zbPre').value.trim(),
+    channels:$('zbCh').value.trim(),rxHost:$('zbRx').value.trim(),heartbeatMin:parseInt($('zbHb').value)||0,autoAck:$('zbAck').checked,forwardUnmarked:$('zbUnm').checked};
+  const r=await fetch('/api/zbx/save',{method:'POST',body:new URLSearchParams({json:JSON.stringify(c)})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){$('zbMsg').textContent=j.error||('Fehler '+r.status);$('zbMsg').className='msg bad';return}
+  zbDirty=false;$('zbMsg').textContent='Gespeichert';$('zbMsg').className='msg ok';zbLoad();
+};
+$('zbTest').onclick=async()=>{
+  if(zbDirty){$('zbMsg').textContent='Erst speichern';$('zbMsg').className='msg warn';return}
+  await fetch('/api/zbx/test',{method:'POST'});
+  $('zbMsg').textContent='Testwert wird gesendet …';$('zbMsg').className='msg';
+  setTimeout(zbLoad,2500);setTimeout(zbLoad,6000);
 };
 
 /* ---------- CLI-Aufträge (Batch) ---------- */
@@ -1363,7 +1424,7 @@ $('bkDown').onclick=async()=>{
     smc.devices.forEach(d=>{if(d.pass==='***')d.pass=''});   // ohne Haken: Passwort leer lassen
     const file={format:'meshcore-gateway-backup',version:2,created:new Date().toISOString(),secrets:withKey,
       node:st.node.name,pubkey:st.node.pubkey,meshcore:st.node.firmware,gateway:st.gateway.version,commands:cmds,channels:chs,sensormeter:smc,
-      gw:{hostname:ex.hostname,wifi:ex.wifi}};
+      gw:{hostname:ex.hostname,wifi:ex.wifi},zabbix:ex.zabbix};
     if(withKey)file.adminPassword=ex.adminPassword;
     const a=document.createElement('a');
     a.href=URL.createObjectURL(new Blob([JSON.stringify(file,null,2)],{type:'application/json'}));
@@ -1372,7 +1433,7 @@ $('bkDown').onclick=async()=>{
     $('bkMsg').textContent=cmds.length+' Befehle, '+chs.length+' Kanäle, '+ex.acl.length+' ACL-Einträge gesichert'+(withKey?' (mit Schlüssel und Passwörtern!)':'');$('bkMsg').className='msg ok';
   }catch(e){$('bkMsg').textContent='Backup fehlgeschlagen: '+e.message;$('bkMsg').className='msg bad'}
 };
-let bkCmds=null,bkChannels=[],bkSm=null,bkGw=null,bkAdm='';
+let bkCmds=null,bkChannels=[],bkSm=null,bkGw=null,bkAdm='',bkZbx=null;
 $('bkFile').onchange=async e=>{
   bkCmds=null;$('bkRestore').disabled=true;$('bkOut').hidden=true;$('bkOpts').hidden=true;
   const f=e.target.files[0];if(!f)return;
@@ -1386,6 +1447,7 @@ $('bkFile').onchange=async e=>{
     bkSm=(j.sensormeter&&Array.isArray(j.sensormeter.devices)&&Array.isArray(j.sensormeter.rules))?j.sensormeter:null;
     bkGw=(j.gw&&j.gw.wifi&&j.gw.wifi.ssid)?j.gw:null;
     bkAdm=typeof j.adminPassword==='string'?j.adminPassword:'';
+    bkZbx=(j.zabbix&&typeof j.zabbix==='object')?j.zabbix:null;   // ab 0.9.0
     // WLAN nur anbieten, wenn das Passwort drin ist oder die SSID gleich bleibt
     const st=await (await fetch('/api/status',{cache:'no-store'})).json().catch(()=>null);
     const wifiOk=bkGw&&(typeof bkGw.wifi.pass==='string'||(st&&st.wifi&&st.wifi.ssid===bkGw.wifi.ssid));
@@ -1423,6 +1485,10 @@ $('bkRestore').onclick=async()=>{
     }
     if(bkSm){   // nach den Kanälen: Regeln verweisen per Name auf sie. Leeres Passwort = keins.
       const r=await fetch('/api/sm/save',{method:'POST',body:new URLSearchParams({json:JSON.stringify(bkSm)})});
+      if(!r.ok)bad++;
+    }
+    if(bkZbx){   // Zabbix-Weiterleitung (E41)
+      const r=await fetch('/api/zbx/save',{method:'POST',body:new URLSearchParams({json:JSON.stringify(bkZbx)})});
       if(!r.ok)bad++;
     }
     let tail='';
@@ -1476,7 +1542,7 @@ function tick(){
   if(view==='console')con.poll();
   if(view==='packets')pkt.poll();
   if(view==='channels')msgs.poll();
-  if(view==='sm'){smLogFeed.poll();if(now-lastSm>=3000){lastSm=now;smLoad()}}
+  if(view==='sm'){smLogFeed.poll();if(now-lastSm>=3000){lastSm=now;smLoad();zbLoad()}}
 }
 setInterval(tick,1000);
 show(location.hash.slice(1)||'status');

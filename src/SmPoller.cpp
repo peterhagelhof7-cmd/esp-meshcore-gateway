@@ -6,6 +6,7 @@
 #include <new>
 
 #include "AckTracker.h"
+#include "GatewayStatus.h"
 #include "ChannelStore.h"
 #include "EventLog.h"
 #include "LogBuffer.h"
@@ -15,6 +16,7 @@
 #include "RuleEngine.h"
 #include "SmConfig.h"
 #include "SmJson.h"
+#include "ZbxFormat.h"
 
 using namespace sm;
 
@@ -115,29 +117,73 @@ bool emit(const char* channelName, const char* text, bool countLimit) {
   return true;
 }
 
+// Zabbix-Kennung einer Meldung (E41), src leer = ohne Kennung
+struct Zev {
+  char src[8];
+  char ev;
+  bool hasValue;
+  float value;
+};
+
+Zev zev(char kind, const char* key, char ev, bool hasValue = false, float value = 0) {
+  Zev z;
+  zbx::makeSrc(kind, key, z.src);
+  z.ev = ev;
+  z.hasValue = hasValue;
+  z.value = value;
+  return z;
+}
+
+// Platz für den Text in einer Kanalnachricht: MeshCore stellt "Name: " voran
+// und kürzt alles auf MAX_TEXT_LEN (160).
+size_t textRoom() {
+  MeshSnapshot s = gateway_status::get();
+  size_t used = strlen(s.nodeName) + 2;
+  return used < mesh_actions::MAX_TEXT - 40 ? mesh_actions::MAX_TEXT - used : 40;
+}
+
+// Meldung senden, je nach Einstellung mit Zabbix-Kennung im Text oder als
+// Kopie mit Kennung in den Zabbix-Kanal. text enthält ggf. schon "[ACK n] ".
+// Rückgabe: Hauptmeldung gesendet. Aufrufer hält s_lock.
+bool emitEvent(const char* channel, const char* text, const Zev* z, uint8_t ackId, bool countLimit) {
+  const Settings& st = R->cfg.settings;
+  if (!z || !z->src[0] || st.zbxMode == ZBX_OFF) return emit(channel, text, countLimit);
+  zbx::Marker m;
+  memset(&m, 0, sizeof(m));
+  strlcpy(m.src, z->src, sizeof(m.src));
+  m.ev = z->ev;
+  m.hasValue = z->hasValue;
+  m.value = z->value;
+  m.ack = ackId;
+  char out[mesh_actions::MAX_TEXT + 1];
+  zbx::appendMarker(text, m, out, textRoom() + 1);
+  if (st.zbxMode == ZBX_APPEND) return emit(channel, out, countLimit);
+  bool ok = emit(channel, text, countLimit);
+  emit(st.zbxChannel, out, countLimit);   // ZBX_CHANNEL
+  return ok;
+}
+
 // Alarm senden; mit Bestätigungspflicht vorher offen eintragen (Nummer im
 // Text). Wird die erste Meldung unterdrückt (Sendelimit), bleibt der Eintrag
 // offen und die Wiederholungen holen sie nach. Aufrufer hält s_lock.
-void emitAlarm(ack::Kind kind, int src, bool ackRequired, const char* channelName, const char* text) {
-  if (!ackRequired) { emit(channelName, text, true); return; }
-  R->acks.open(kind, src, channelName, text, millis());
-  for (int i = 0; i < ack::MAX_OPEN; i++) {
-    const ack::Entry& e = R->acks.at(i);
-    if (!e.used || e.kind != kind || e.src != src) continue;
-    char out[mesh_actions::MAX_TEXT + 1];
-    ack::Tracker::format(e, false, out, sizeof(out));
-    emit(channelName, out, true);
-    return;
-  }
+void emitAlarm(ack::Kind kind, int src, bool ackRequired, const char* channelName, const char* text, const Zev& z) {
+  if (!ackRequired) { emitEvent(channelName, text, &z, 0, true); return; }
+  uint8_t id = R->acks.open(kind, src, channelName, text, millis());
+  const Settings& st = R->cfg.settings;
+  R->acks.setZbx(id, st.zbxMode == ZBX_CHANNEL ? st.zbxChannel : "", st.zbxMode != ZBX_OFF ? z.src : "",
+                 z.hasValue, z.value);
+  char out[mesh_actions::MAX_TEXT + 1];
+  snprintf(out, sizeof(out), "[ACK %u] %s", (unsigned)id, text);
+  emitEvent(channelName, out, &z, id, true);
 }
 
 // Erinnerung (repeatMin) einer Quelle mit offener Nummer trägt die Nummer mit.
-void emitReminder(ack::Kind kind, int src, const char* channelName, const char* text) {
+void emitReminder(ack::Kind kind, int src, const char* channelName, const char* text, const Zev& z) {
   uint8_t id = R->acks.openIdOf(kind, src);
-  if (!id) { emit(channelName, text, true); return; }
+  if (!id) { emitEvent(channelName, text, &z, 0, true); return; }
   char out[mesh_actions::MAX_TEXT + 1];
   snprintf(out, sizeof(out), "[ACK %u] %s", (unsigned)id, text);
-  emit(channelName, out, true);
+  emitEvent(channelName, out, &z, id, true);
 }
 
 // Fällige Wiederholungen (höchstens eine pro Durchlauf). Aufrufer hält s_lock.
@@ -148,7 +194,12 @@ void processRepeats() {
   const ack::Entry& e = R->acks.at(i);
   char out[mesh_actions::MAX_TEXT + 1];
   ack::Tracker::format(e, true, out, sizeof(out));
-  if (emit(e.channel, out, true)) {
+  Zev z;
+  strlcpy(z.src, e.marker, sizeof(z.src));
+  z.ev = 'W';
+  z.hasValue = e.hasValue;
+  z.value = e.value;
+  if (emitEvent(e.channel, out, &z, e.id, true)) {
     R->acks.repeated(i, now);
     if (e.repeats >= ack::REPEATS) {
       char l[LogBuffer::LINE_LEN];
@@ -164,10 +215,16 @@ void processRepeats() {
 // Antworten "ACK [Nr]" aus den Kanälen. Aufrufer hält s_lock.
 void processAckReplies() {
   AckMsg m;
+  char own[32];
+  bool haveOwn = false;
   while (s_ackQueue && xQueueReceive(s_ackQueue, &m, 0) == pdTRUE) {
+    if (!haveOwn) {
+      strlcpy(own, gateway_status::get().nodeName, sizeof(own));
+      haveOwn = true;
+    }
     uint8_t ids[ack::MAX_OPEN];
-    int n = R->acks.acknowledge(m.channel, m.body, ids, ack::MAX_OPEN);
-    if (n < 0) continue;
+    int n = R->acks.acknowledge(m.channel, m.body, own, ids, ack::MAX_OPEN);
+    if (n < 0) continue;   // kein ACK oder an ein anderes Gateway (@[Name])
     char l[LogBuffer::LINE_LEN];
     if (n == 0) {
       snprintf(l, sizeof(l), "%s: \"%s\" von %s - nichts Offenes dazu", m.channel, m.body, m.sender);
@@ -182,7 +239,7 @@ void processAckReplies() {
       p += w;
     }
     // Rückmeldung in den Kanal (zählt nicht gegen das Sendelimit: eine
-    // Nachricht je Bestätigung, ausgelöst von Menschen)
+    // Nachricht je Bestätigung)
     char out[mesh_actions::MAX_TEXT + 1];
     snprintf(out, sizeof(out), "ACK %s bestätigt (%s)", list, m.sender);
     emit(m.channel, out, false);
@@ -192,7 +249,40 @@ void processAckReplies() {
   }
 }
 
+// Lebenszeichen für Zabbix (E41): nur mit Kennung, im Modus "eigener Kanal"
+// nur dorthin, sonst in den Alarmkanal. Aufrufer hält s_lock.
+void processHeartbeat() {
+  static uint32_t lastMs = 0;
+  static bool first = true;
+  const Settings& st = R->cfg.settings;
+  if (st.zbxMode == ZBX_OFF || !st.heartbeatH) { first = true; return; }
+  uint32_t now = millis();
+  // erstes Lebenszeichen 2 min nach dem Start bzw. nach dem Einschalten
+  if (first) { lastMs = now - st.heartbeatH * 3600000UL + 120000UL; first = false; }
+  if (now - lastMs < st.heartbeatH * 3600000UL) return;
+  lastMs = now;
+  float hours = now / 3600000.0f;
+  char text[64];
+  snprintf(text, sizeof(text), "LEBENSZEICHEN Laufzeit %.1f h", (double)hours);
+  Zev z = zev('G', "gateway", 'H', true, hours);
+  zbx::Marker m;
+  memset(&m, 0, sizeof(m));
+  strlcpy(m.src, z.src, sizeof(m.src));
+  m.ev = 'H';
+  m.hasValue = true;
+  m.value = hours;
+  char out[mesh_actions::MAX_TEXT + 1];
+  zbx::appendMarker(text, m, out, textRoom() + 1);
+  emit(st.zbxMode == ZBX_CHANNEL ? st.zbxChannel : st.defaultChannel, out, true);
+}
+
 const char* tplOr(const char* t, const char* def) { return (t && *t) ? t : def; }
+
+// Stabiler Schlüssel einer Regel für die Zabbix-Quelle: Gerät, Messwert,
+// Richtung. Grenzwert/Hysterese ändern ändert die Quelle nicht.
+String ruleKey(const Rule& r, const Device& d) {
+  return String(d.name) + "|" + r.path + "|" + (r.op ? "<" : ">");
+}
 
 void ruleText(const Rule& r, const Device& d, const RuleRuntime& rt, const char* state, const char* tpl,
               char* out, size_t outLen) {
@@ -326,7 +416,8 @@ void evaluateDevice(int di, bool ok, uint32_t now) {
     const char* tpl = de == rules::DevEvent::OFFLINE ? tplOr(R->cfg.settings.offlineText, DEFAULT_OFFLINE)
                                                      : tplOr(R->cfg.settings.onlineText, DEFAULT_ONLINE);
     rules::renderTemplate(tpl, v, text, sizeof(text));
-    emit(R->cfg.settings.defaultChannel, text, true);
+    Zev z = zev('D', d.name, de == rules::DevEvent::OFFLINE ? 'F' : 'N');
+    emitEvent(R->cfg.settings.defaultChannel, text, &z, 0, true);
   }
   if (!ok) return;
 
@@ -351,13 +442,15 @@ void evaluateDevice(int di, bool ok, uint32_t now) {
     char text[mesh_actions::MAX_TEXT + 1];
     ruleText(r, d, rt, state, tpl, text, sizeof(text));
     const char* ch = r.channel[0] ? r.channel : R->cfg.settings.defaultChannel;
+    char ev = e == rules::Event::ALERT ? 'A' : (e == rules::Event::REMIND ? 'E' : 'O');
+    Zev z = zev('R', ruleKey(r, d).c_str(), ev, rt.st.hasValue, rt.st.lastValue);
     if (e == rules::Event::ALERT) {
-      emitAlarm(ack::Kind::RULE, ri, r.ackRequired, ch, text);
+      emitAlarm(ack::Kind::RULE, ri, r.ackRequired, ch, text, z);
     } else if (e == rules::Event::REMIND) {
-      emitReminder(ack::Kind::RULE, ri, ch, text);
+      emitReminder(ack::Kind::RULE, ri, ch, text, z);
     } else {
       R->acks.markCleared(ack::Kind::RULE, ri);   // bleibt bis ACK offen (E39)
-      emit(ch, text, true);
+      emitEvent(ch, text, &z, 0, true);
     }
   }
 }
@@ -380,11 +473,12 @@ void evaluatePing(int pi, bool ok, uint32_t now) {
   char text[mesh_actions::MAX_TEXT + 1];
   rules::renderTemplate(tpl, v, text, sizeof(text));
   // Alarmkanal = Standardkanal
+  Zev z = zev('P', t.name, down ? 'A' : 'O', down, (float)rules::pingDownSeconds(pr.st, now));
   if (down) {
-    emitAlarm(ack::Kind::PING, pi, t.ackRequired, R->cfg.settings.defaultChannel, text);
+    emitAlarm(ack::Kind::PING, pi, t.ackRequired, R->cfg.settings.defaultChannel, text, z);
   } else {
     R->acks.markCleared(ack::Kind::PING, pi);
-    emit(R->cfg.settings.defaultChannel, text, true);
+    emitEvent(R->cfg.settings.defaultChannel, text, &z, 0, true);
   }
 }
 
@@ -475,6 +569,7 @@ void task(void*) {
     // Bestätigungen und Wiederholungen gehen per Funk, also auch ohne WLAN (E39)
     processAckReplies();
     processRepeats();
+    processHeartbeat();
     xSemaphoreGive(s_lock);
     measureInternal(enabled);
     if (!enabled) continue;
@@ -570,7 +665,8 @@ bool sm_poller::sendTest(int ruleIdx, String& err) {
     if (channel_store::findByName(ch) < 0) {
       err = "kein gültiger Kanal";
     } else {
-      emit(ch, text, false);
+      Zev z = zev('R', ruleKey(r, d).c_str(), 'T', rt.st.hasValue, rt.st.lastValue);
+      emitEvent(ch, text, &z, 0, false);
       ok = true;
     }
   }

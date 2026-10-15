@@ -29,7 +29,11 @@ struct Entry {
   Kind kind = Kind::RULE;
   int8_t src = -1;              // Regel- bzw. Ping-Index
   char channel[CHANNEL_LEN] = {0};
+  char channel2[CHANNEL_LEN] = {0};   // Zabbix-Kanal (E41), leer = keiner; ACK gilt aus beiden
   char text[TEXT_LEN] = {0};    // Meldung ohne Präfix "[ACK n] "
+  char marker[8] = {0};         // Zabbix-Quelle (E41), leer = ohne Kennung
+  bool hasValue = false;
+  float value = 0;
   uint32_t sentMs = 0;          // erste Meldung
   uint32_t lastMs = 0;          // letzte Meldung (erste oder Wiederholung)
   uint8_t repeats = 0;          // gesendete Wiederholungen
@@ -41,6 +45,8 @@ public:
   // Neuer Alarm. Ein offener Eintrag derselben Quelle wird ersetzt (neue
   // Nummer). Ist alles belegt, fällt der älteste Eintrag weg. Rückgabe: Nummer.
   uint8_t open(Kind kind, int src, const char* channel, const char* text, uint32_t nowMs);
+  // Zabbix-Angaben zu einem offenen Eintrag (E41): Zweitkanal, Quelle, Wert
+  void setZbx(uint8_t id, const char* channel2, const char* marker, bool hasValue, float value);
   // Zustand der Quelle wieder normal: Eintrag bleibt offen, Wiederholungen
   // tragen den Zusatz "inzw. OK".
   void markCleared(Kind kind, int src);
@@ -56,8 +62,10 @@ public:
   void postpone(int idx, uint32_t nowMs) { if (idx >= 0 && idx < MAX_OPEN) _e[idx].lastMs = nowMs; }
 
   // Antworttext auswerten (ohne "Absender: "). Bestätigt passende offene
-  // Einträge im Kanal. Rückgabe: Anzahl, Nummern in ids. -1 = kein ACK-Text.
-  int acknowledge(const char* channel, const char* body, uint8_t* ids, int maxIds);
+  // Einträge im Kanal (Haupt- oder Zabbix-Kanal). "@[Name] ACK" gilt nur,
+  // wenn Name = ownName (Groß/klein egal), sonst -2 (an ein anderes Gateway).
+  // Rückgabe: Anzahl, Nummern in ids. -1 = kein ACK-Text.
+  int acknowledge(const char* channel, const char* body, const char* ownName, uint8_t* ids, int maxIds);
   // Bestätigen über die Weboberfläche. false = Nummer unbekannt.
   bool acknowledgeId(uint8_t id);
 
@@ -66,8 +74,9 @@ public:
 
   const Entry& at(int i) const { return _e[i]; }
 
-  // "ACK", "ack 3", "ACK #3", "@[Name] ACK 3" -> true, id (0 = alle)
-  static bool parseAck(const char* body, int& id);
+  // "ACK", "ack 3", "ACK #3", "@[Name] ACK 3" -> true, id (0 = alle),
+  // target = Name aus "@[Name]" (leer = an alle)
+  static bool parseAck(const char* body, int& id, char* target = nullptr, size_t targetLen = 0);
   // Meldungstext einer Wiederholung bzw. der ersten Meldung bauen.
   static size_t format(const Entry& e, bool repeat, char* out, size_t outLen);
 

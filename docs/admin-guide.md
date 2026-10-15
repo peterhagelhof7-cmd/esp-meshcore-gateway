@@ -246,6 +246,38 @@ Minuten** wiederholt (`[ACK 3] WDH 1/3: …`), bis jemand **im selben Kanal** an
 - Antwort per **Direktnachricht** an das Gateway geht nicht: ein Repeater nimmt Direktnachrichten nur von
   angemeldeten Admins/Gästen an. Deshalb im Kanal antworten.
 
+**Zabbix-Anbindung** (ab 0.9.0): Ein zweites Gateway mit WLAN zum Zabbix-Proxy holt die Alarme aus dem Mesh und
+liefert sie per Trapper (Zabbix-Sender-Protokoll, TCP 10051) ein. Beide Geräte haben dieselbe Firmware.
+
+*Am meldenden Gateway* (Überwachung → Einstellungen → **Zabbix-Kennung**):
+- **im Alarmtext anhängen**: jede Meldung bekommt am Ende eine Kennung, z. B.
+  `[ACK 3] ALARM Heizraum: Temperatur 31°C (>30°C) #Z1;R3fa2;A;31;3` (Quelle, Ereignis, Wert, ACK-Nr). Der Text
+  wird dafür nötigenfalls gekürzt, die Kennung nie.
+- **zusätzlich in eigenem Zabbix-Kanal**: der Alarmkanal bleibt sauber, die Kopie mit Kennung geht in einen
+  eigenen (privaten) Kanal. Kostet doppelt Airtime, beides zählt zum Sendelimit.
+- Optional **Lebenszeichen** alle N Stunden (nur mit Kennung), damit Zabbix den Ausfall eines Gateways bemerkt.
+- Ereignisse: A Alarm, E Erinnerung, W Wiederholung, O Entwarnung, F offline, N wieder online, H Lebenszeichen,
+  T Test. Die Quelle (`R…` Regel, `P…` Ping-Ziel, `D…` Gerät, `G…` Gateway) ist ein Hash aus Gerät/Messwert/Richtung
+  bzw. Name und bleibt gleich, wenn sich nur Grenzwert oder Reihenfolge ändern.
+
+*Am Empfänger* (Überwachung → **Zabbix-Weiterleitung**): einschalten, Proxy/Server und Port eintragen, optional
+Host-Präfix und Kanalfilter. „Testwert senden“ prüft die Verbindung (`meshcore.rx.heartbeat` am eigenen Host).
+- Der Zabbix-Host einer Meldung = Präfix + Name des meldenden Gateways wie dessen WLAN-Hostname
+  (`DE-BY-ORT01-GW` → `de-by-ort01-gw`), Key `meshcore.event`, Wert = JSON.
+- **ACK**: Erst wenn Zabbix den Wert angenommen hat (`processed: 1`), antwortet der Empfänger im selben Kanal mit
+  `@[DE-BY-ORT01-GW] ACK 3`. Damit hört das Gateway mit den Wiederholungen auf – „bestätigt“ heißt dann „liegt in
+  Zabbix“, um die Benachrichtigung kümmert sich Zabbix. Ist Zabbix nicht erreichbar, gibt es kein ACK: der
+  Empfänger versucht es alle 30 s (bis 1 h), das Gateway wiederholt im Mesh.
+- Lehnt Zabbix ab (Host fehlt, Item kein Trapper, Allowed hosts), gibt es ebenfalls kein ACK; der Grund steht im
+  Zabbix-Bereich und im Ereignis-Log.
+- **Wird der Host von einem Proxy überwacht, muss der Empfänger an diesen Proxy senden** (der Server lehnt sonst ab).
+- Ein ACK mit `@[Name]` gilt nur für das Gateway dieses Namens; ohne `@[…]` für alle Gateways im Kanal.
+
+*In Zabbix*: [`docs/zabbix-template-meshcore.yaml`](zabbix-template-meshcore.yaml) importieren (Format 7.0).
+Template **MeshCore Gateway Alarme** je meldendem Gateway (Host ohne Schnittstelle, Name wie oben), Template
+**MeshCore Zabbix-Empfaenger** für den Empfänger. Ein Problem je Alarm, die Entwarnung derselben Quelle schließt es.
+Den Trigger „kein Lebenszeichen“ nur aktivieren, wenn am Gateway Lebenszeichen eingestellt sind.
+
 **Private Kanäle** aus der App übernehmen: In der App den Kanal teilen bzw. den Schlüssel anzeigen (32 Hex-Zeichen)
 und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.
 

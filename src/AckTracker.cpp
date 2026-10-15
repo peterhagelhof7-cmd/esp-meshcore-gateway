@@ -48,6 +48,17 @@ uint8_t Tracker::open(Kind kind, int src, const char* channel, const char* text,
   return e.id;
 }
 
+void Tracker::setZbx(uint8_t id, const char* channel2, const char* marker, bool hasValue, float value) {
+  for (int i = 0; i < MAX_OPEN; i++) {
+    Entry& e = _e[i];
+    if (!e.used || e.id != id) continue;
+    cpy(e.channel2, sizeof(e.channel2), channel2);
+    cpy(e.marker, sizeof(e.marker), marker);
+    e.hasValue = hasValue;
+    e.value = value;
+  }
+}
+
 void Tracker::markCleared(Kind kind, int src) {
   for (int i = 0; i < MAX_OPEN; i++) {
     if (_e[i].used && _e[i].kind == kind && _e[i].src == src) _e[i].cleared = true;
@@ -80,15 +91,22 @@ void Tracker::repeated(int idx, uint32_t nowMs) {
   _e[idx].lastMs = nowMs;
 }
 
-bool Tracker::parseAck(const char* body, int& id) {
+bool Tracker::parseAck(const char* body, int& id, char* target, size_t targetLen) {
   id = 0;
+  if (target && targetLen) target[0] = 0;
   if (!body) return false;
   const char* p = body;
   while (*p == ' ') p++;
-  // Antwort-Erwähnung der App: "@[Name] ..."
+  // Antwort-Erwähnung der App bzw. gezieltes ACK des Zabbix-Empfängers: "@[Name] ..."
   if (p[0] == '@' && p[1] == '[') {
     const char* end = strchr(p, ']');
     if (!end) return false;
+    if (target && targetLen) {
+      size_t n = (size_t)(end - (p + 2));
+      if (n >= targetLen) n = targetLen - 1;
+      memcpy(target, p + 2, n);
+      target[n] = 0;
+    }
     p = end + 1;
     while (*p == ' ') p++;
   }
@@ -106,13 +124,21 @@ bool Tracker::parseAck(const char* body, int& id) {
   return *p == 0;   // nur "ACK [Nr]" - ganze Sätze mit "ack..." zählen nicht
 }
 
-int Tracker::acknowledge(const char* channel, const char* body, uint8_t* ids, int maxIds) {
+static bool sameName(const char* a, const char* b) {
+  for (; *a && *b; a++, b++) if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return false;
+  return *a == *b;
+}
+
+int Tracker::acknowledge(const char* channel, const char* body, const char* ownName, uint8_t* ids, int maxIds) {
   int want;
-  if (!parseAck(body, want)) return -1;
+  char target[32];
+  if (!parseAck(body, want, target, sizeof(target))) return -1;
+  if (target[0] && !sameName(target, ownName ? ownName : "")) return -2;
+  const char* ch = channel ? channel : "";
   int n = 0;
   for (int i = 0; i < MAX_OPEN; i++) {
     Entry& e = _e[i];
-    if (!e.used || strcmp(e.channel, channel ? channel : "") != 0) continue;
+    if (!e.used || !*ch || (strcmp(e.channel, ch) != 0 && strcmp(e.channel2, ch) != 0)) continue;
     if (want && e.id != want) continue;
     if (n < maxIds) ids[n] = e.id;
     n++;
