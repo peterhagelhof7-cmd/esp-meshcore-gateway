@@ -46,6 +46,7 @@ struct Rule {
   char channel[32];     // Kanalname, leer = Standardkanal (Name statt Index, E24)
   bool notifyRecovery;
   char text[100];       // leer = Standardvorlage
+  bool ackRequired;     // aktiv bis bestätigt (E39): wiederholen nach 5/15/30 min bis "ACK"
 };
 
 // Ping-Check (E25): Ziel antwortet länger als thresholdS nicht -> Meldung in
@@ -57,6 +58,7 @@ struct PingTarget {
   char host[64];        // IP oder Hostname
   uint16_t thresholdS;  // max. Ausfallzeit, intervalS..65535 s
   uint16_t intervalS;   // Prüfabstand, PING_INTERVAL_MIN_S..PING_INTERVAL_MAX_S
+  bool ackRequired;     // aktiv bis bestätigt (E39)
 };
 
 struct Settings {

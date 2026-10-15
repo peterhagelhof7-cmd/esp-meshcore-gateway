@@ -2,6 +2,7 @@
 
 #include "LogBuffer.h"
 #include "ChannelStore.h"
+#include "SmPoller.h"
 
 #include <helpers/TxtDataHelpers.h>
 #include <helpers/BaseChatMesh.h>
@@ -121,6 +122,7 @@ void GatewayMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh
   snprintf(line, sizeof(line), "%d\t%s\t%.1f\t%u\t%s", idx, c.name, packet->getSNR(),
            (unsigned)packet->getPathHashCount(), text);
   channel_log.push('M', timestamp, line);
+  sm_poller::onChannelText(c.name, text);   // Antwort "ACK [Nr]" auf Alarme (E39)
 }
 
 bool GatewayMesh::sendChannelText(int channelIdx, const char* text, char* err, size_t errLen) {

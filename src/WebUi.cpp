@@ -14,6 +14,7 @@
 #include "GatewayStatus.h"
 #include "LogBuffer.h"
 #include "MeshActions.h"
+#include "NetCheck.h"
 #include "NetworkManager.h"
 #include "OtaUpdate.h"
 #include "Profile.h"
@@ -38,6 +39,10 @@ static bool checkAuth(AsyncWebServerRequest* req) {
     return false;
   }
   return true;
+}
+
+static String formParam(AsyncWebServerRequest* req, const char* name) {
+  return req->hasParam(name, true) ? req->getParam(name, true)->value() : String();
 }
 
 static String jsonEscape(const String& in) {
@@ -140,6 +145,18 @@ static void handleStatus(AsyncWebServerRequest* req) {
   j += jsonEscape(network.hostname());
   j += "\",\"hostname_auto\":";
   j += network.hostnameAuto() ? "true" : "false";
+  // Feste IP (E40): aktuelle Werte und Einstellung
+  const GatewaySettings& g = gw_config.get();
+  bool sta = network.mode() == NetworkManager::Mode::STATION;
+  j += ",\"static\":";
+  j += network.staticActive() ? "true" : "false";
+  j += ",\"mask\":\"" + (sta ? WiFi.subnetMask().toString() : String()) + "\"";
+  j += ",\"gw\":\"" + (sta ? WiFi.gatewayIP().toString() : String()) + "\"";
+  j += ",\"dns\":\"" + (sta ? WiFi.dnsIP(0).toString() : String()) + "\"";
+  j += ",\"cfg\":{\"ip\":\"" + jsonEscape(g.ipAddr) + "\",\"mask\":\"" + jsonEscape(g.ipMask) + "\",\"gw\":\"" +
+       jsonEscape(g.ipGw) + "\",\"dns1\":\"" + jsonEscape(g.ipDns1) + "\",\"dns2\":\"" + jsonEscape(g.ipDns2) +
+       "\",\"pending\":" + (g.ipPendingCheck ? "true" : "false") + "}";
+  j += ",\"ip_note\":\"" + jsonEscape(network.ipNote()) + "\"";
   j += "}}";
 
   req->send(200, "application/json", j);
@@ -190,6 +207,15 @@ static void handleWifiSave(AsyncWebServerRequest* req) {
   }
 
   GatewaySettings s = gw_config.get();
+  // Feste IP (E40): fehlt das Feld = unverändert, leer = DHCP
+  if (req->hasParam("ip", true)) {
+    String err;
+    if (!GatewayConfig::applyIp(s, formParam(req, "ip"), formParam(req, "mask"), formParam(req, "gw"),
+                                formParam(req, "dns1"), formParam(req, "dns2"), err)) {
+      req->send(400, "application/json", "{\"error\":\"" + jsonEscape(err) + "\"}");
+      return;
+    }
+  }
   // Leeres Passwort bei unveränderter SSID = altes Passwort behalten
   // (das Formular zeigt gespeicherte Passwörter nie an).
   if (!(pass.length() == 0 && ssid == s.wifiSsid)) s.wifiPass = pass;
@@ -198,10 +224,36 @@ static void handleWifiSave(AsyncWebServerRequest* req) {
   if (req->hasParam("hostname", true)) s.hostname = GatewayConfig::hostSetting(host);
   s.wifiPendingTest = true;
   gw_config.set(s);
-  event_log::addf("SYS", "WLAN-Einstellungen gespeichert (%s), Neustart", ssid.c_str());
+  event_log::addf("SYS", "WLAN-Einstellungen gespeichert (%s, %s), Neustart", ssid.c_str(),
+                  s.staticIp() ? ("feste IP " + s.ipAddr).c_str() : "DHCP");
 
   req->send(200, "application/json", "{\"ok\":true,\"reboot\":true}");
   s_rebootAt = millis() + 1500;
+}
+
+// Feste IP vorab prüfen (E40): POST startet, GET liefert den Stand.
+static void handleCheckIpStart(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  IPAddress ip;
+  String s = formParam(req, "ip");
+  s.trim();
+  if (!ip.fromString(s)) {
+    req->send(400, "application/json", "{\"error\":\"IP-Adresse ungültig\"}");
+    return;
+  }
+  if (!net_check::probe(ip)) {
+    req->send(409, "application/json", "{\"error\":\"Es läuft schon eine Prüfung, gleich noch einmal\"}");
+    return;
+  }
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void handleCheckIpResult(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  char detail[48];
+  net_check::State st = net_check::result(detail, sizeof(detail));
+  req->send(200, "application/json",
+            String("{\"state\":\"") + net_check::stateName(st) + "\",\"detail\":\"" + jsonEscape(String(detail)) + "\"}");
 }
 
 static void handleCli(AsyncWebServerRequest* req) {
@@ -315,10 +367,6 @@ static void sendLog(AsyncWebServerRequest* req, LogBuffer& log) {
 }
 
 // ---------- M4: Kanäle ----------
-
-static String formParam(AsyncWebServerRequest* req, const char* name) {
-  return req->hasParam(name, true) ? req->getParam(name, true)->value() : String();
-}
 
 static void handleChannelsGet(AsyncWebServerRequest* req) {
   if (!checkAuth(req)) return;
@@ -439,6 +487,9 @@ static void handleBackupExtra(AsyncWebServerRequest* req) {
   j.reserve(8192);
   j += "{\"hostname\":\"" + jsonEscape(g.hostname) + "\",\"wifi\":{\"ssid\":\"" + jsonEscape(g.wifiSsid) + "\"";
   if (secrets) j += ",\"pass\":\"" + jsonEscape(g.wifiPass) + "\"";
+  // Feste IP (E40), leer = DHCP
+  j += ",\"ip\":\"" + jsonEscape(g.ipAddr) + "\",\"mask\":\"" + jsonEscape(g.ipMask) + "\",\"gw\":\"" +
+       jsonEscape(g.ipGw) + "\",\"dns1\":\"" + jsonEscape(g.ipDns1) + "\",\"dns2\":\"" + jsonEscape(g.ipDns2) + "\"";
   j += "}";
   if (secrets) {
     MeshSnapshot s = gateway_status::get();
@@ -485,6 +536,16 @@ static void handleBackupApply(AsyncWebServerRequest* req) {
     if (!req->hasParam("pass", true) && ssid != s.wifiSsid) {
       req->send(400, "application/json", "{\"error\":\"WLAN-Passwort fehlt im Backup\"}");
       return;
+    }
+    // Feste IP aus dem Backup (ab 0.9.0), wird nach dem Neustart erst geprüft
+    if (req->hasParam("ip", true)) {
+      String err;
+      if (!GatewayConfig::applyIp(s, formParam(req, "ip"), formParam(req, "mask"), formParam(req, "gw"),
+                                  formParam(req, "dns1"), formParam(req, "dns2"), err)) {
+        req->send(400, "application/json", "{\"error\":\"Backup: " + jsonEscape(err) + "\"}");
+        return;
+      }
+      if (s.staticIp()) s.ipPendingCheck = true;   // auch gleiche Adresse: Gerät kann woanders stehen
     }
     if (req->hasParam("pass", true)) s.wifiPass = pass;
     s.wifiSsid = ssid;
@@ -578,6 +639,16 @@ static void handleSmTest(AsyncWebServerRequest* req) {
   req->send(200, "application/json", "{\"ok\":true}");
 }
 
+static void handleSmAck(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String err;
+  if (!sm_poller::ackFromWeb(formParam(req, "id").toInt(), err)) {
+    req->send(400, "application/json", "{\"error\":\"" + jsonEscape(err) + "\"}");
+    return;
+  }
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
 // ---------- M5: Firmware-Update ----------
 
 // Der Upload-Callback läuft VOR dem Request-Handler. Ohne eigene Prüfung
@@ -615,6 +686,8 @@ void web_ui::begin() {
   server.on(AsyncURIMatcher::exact("/api/status"), HTTP_GET, handleStatus);
   server.on(AsyncURIMatcher::exact("/api/wifi/scan"), HTTP_GET, handleWifiScan);
   server.on(AsyncURIMatcher::exact("/api/wifi"), HTTP_POST, handleWifiSave);
+  server.on(AsyncURIMatcher::exact("/api/wifi/checkip"), HTTP_POST, handleCheckIpStart);
+  server.on(AsyncURIMatcher::exact("/api/wifi/checkip"), HTTP_GET, handleCheckIpResult);
   server.on(AsyncURIMatcher::exact("/api/reboot"), HTTP_POST, handleReboot);
   server.on(AsyncURIMatcher::exact("/api/cli"), HTTP_POST, handleCli);
   server.on(AsyncURIMatcher::exact("/api/cli/batch"), HTTP_POST, handleCliBatch);
@@ -630,6 +703,7 @@ void web_ui::begin() {
   server.on(AsyncURIMatcher::exact("/api/sm/save"), HTTP_POST, handleSmSave);
   server.on(AsyncURIMatcher::exact("/api/sm/poll"), HTTP_POST, handleSmPoll);
   server.on(AsyncURIMatcher::exact("/api/sm/test"), HTTP_POST, handleSmTest);
+  server.on(AsyncURIMatcher::exact("/api/sm/ack"), HTTP_POST, handleSmAck);
   server.on(AsyncURIMatcher::exact("/api/sm/log"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, alert_log); });
   server.on(AsyncURIMatcher::exact("/api/channels"), HTTP_GET, handleChannelsGet);
   server.on(AsyncURIMatcher::exact("/api/channels"), HTTP_POST, handleChannelsPost);

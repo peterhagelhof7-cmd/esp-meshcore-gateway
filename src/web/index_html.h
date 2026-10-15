@@ -122,6 +122,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <dt>Modus</dt><dd id="w_mode">–</dd>
 <dt>SSID</dt><dd id="w_ssid">–</dd>
 <dt>IP</dt><dd id="w_ip">–</dd>
+<dt>Adressvergabe</dt><dd id="w_ipmode">–</dd>
 <dt>Signal</dt><dd id="w_rssi">–</dd>
 <dt>Hostname</dt><dd id="w_host">–</dd>
 <dt>MAC</dt><dd class="mono" id="w_mac">–</dd>
@@ -215,6 +216,13 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <div class="row"><button type="button" id="sdSave">Gerät speichern</button><button type="button" class="sec" id="sdCancel" hidden>Abbrechen</button><span class="msg" id="sdMsg" style="margin:0"></span></div>
 </section>
 
+<section style="margin-bottom:16px" id="ackSec" hidden>
+<h2>Offene Bestätigungen</h2>
+<div class="tbl"><table><thead><tr><th>Nr</th><th>Meldung</th><th>Kanal</th><th>Seit</th><th>Wiederholt</th><th></th></tr></thead><tbody id="ackBody"></tbody></table></div>
+<p class="hint">Bestätigen per Antwort im Kanal: <b>ACK</b> (alle offenen dort) oder <b>ACK Nr</b>. Hier bestätigen schickt ebenfalls eine kurze Rückmeldung in den Kanal.</p>
+<span class="msg" id="ackMsg" style="margin:0"></span>
+</section>
+
 <section style="margin-bottom:16px">
 <h2>Regeln</h2>
 <div class="tbl"><table><thead><tr><th>Gerät / Messwert</th><th>Bedingung</th><th>Kanal</th><th>Zustand</th><th></th></tr></thead><tbody id="smRuleBody"></tbody></table></div>
@@ -229,7 +237,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <label for="srRep">Erinnern alle (min)</label><div class="fld"><input id="srRep" type="number" min="0" max="1440" value="0"><small>0 = nur einmal melden</small></div>
 <label for="srCh">Kanal</label><div class="fld"><select id="srCh"></select></div>
 <label for="srText">Text</label><div class="fld"><input id="srText" maxlength="99" spellcheck="false"><small>leer = Standardtext. Platzhalter: {state} {device} {metric} {value} {unit} {op} {threshold}</small></div>
-<label>Optionen</label><div class="fld"><label class="chk"><input type="checkbox" id="srRec" checked> Entwarnung senden</label><label class="chk"><input type="checkbox" id="srEn" checked> aktiv</label></div>
+<label>Optionen</label><div class="fld"><label class="chk"><input type="checkbox" id="srRec" checked> Entwarnung senden</label><label class="chk"><input type="checkbox" id="srAck"> aktiv bis bestätigt</label><label class="chk"><input type="checkbox" id="srEn" checked> aktiv</label><small>„aktiv bis bestätigt“: Meldung bekommt eine Nummer und wird nach 5, 15 und 30 min wiederholt, bis jemand im Kanal mit <b>ACK</b> (alle offenen) oder <b>ACK Nr</b> antwortet.</small></div>
 </div>
 <div class="row"><button type="button" id="srSave">Regel speichern</button><button type="button" class="sec" id="srCancel" hidden>Abbrechen</button><span class="msg" id="srMsg" style="margin:0"></span></div>
 </section>
@@ -244,7 +252,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <label for="pgHost">Name oder IP</label><div class="fld"><input id="pgHost" maxlength="63" placeholder="10.10.0.1 oder nas.example.de" spellcheck="false"></div>
 <label for="pgThr">Schwellwert (s)</label><div class="fld"><input id="pgThr" type="number" min="10" max="65535" value="60"><small>Antwortet das Ziel länger als so viele Sekunden nicht, geht eine Meldung in den Alarmkanal. Mindestens so groß wie der Prüfabstand.</small></div>
 <label for="pgIv">Prüfabstand (s)</label><div class="fld"><input id="pgIv" type="number" min="10" max="3600" value="10"><small>10–3600 s, je Prüfung 3 Pings (eine Antwort genügt)</small></div>
-<label>Optionen</label><div class="fld"><label class="chk"><input type="checkbox" id="pgEn" checked> aktiv</label></div>
+<label>Optionen</label><div class="fld"><label class="chk"><input type="checkbox" id="pgAck"> aktiv bis bestätigt</label><label class="chk"><input type="checkbox" id="pgEn" checked> aktiv</label><small>Wiederholung nach 5, 15 und 30 min, bis im Alarmkanal jemand mit ACK antwortet.</small></div>
 </div>
 <div class="row"><button type="button" id="pgSave">Ping-Ziel speichern</button><button type="button" class="sec" id="pgCancel" hidden>Abbrechen</button><span class="msg" id="pgMsg" style="margin:0"></span></div>
 </section>
@@ -364,6 +372,18 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <label for="hostname">Hostname</label>
 <label class="chk"><input type="checkbox" id="hostAuto" checked> wie Gerätename (LoRa)</label>
 <input id="hostname" name="hostname" maxlength="31" pattern="[A-Za-z0-9 _\-]*" title="Buchstaben, Ziffern, -" disabled>
+<label>IP-Adresse</label>
+<label class="chk"><input type="checkbox" id="ipStatic"> feste IP-Adresse (sonst automatisch per DHCP)</label>
+<div id="ipBox" hidden>
+<label for="ipAddr">IP-Adresse</label><input id="ipAddr" inputmode="decimal" spellcheck="false" placeholder="10.10.0.50">
+<label for="ipMask">Subnetzmaske</label><input id="ipMask" inputmode="decimal" spellcheck="false" placeholder="255.255.255.0">
+<label for="ipGw">Gateway (Router)</label><input id="ipGw" inputmode="decimal" spellcheck="false" placeholder="10.10.0.1">
+<label for="ipDns1">DNS 1 (leer = Router)</label><input id="ipDns1" inputmode="decimal" spellcheck="false">
+<label for="ipDns2">DNS 2 (optional)</label><input id="ipDns2" inputmode="decimal" spellcheck="false">
+<div class="row"><button type="button" class="sec" id="ipCheckBtn">Adresse prüfen</button></div>
+<p class="hint">Vor dem Speichern wird geprüft, ob die Adresse schon belegt ist (ARP und Ping im aktuellen WLAN). Nach dem Neustart meldet sich das Gateway erst per DHCP an, prüft erneut, schaltet dann um und testet den Router. Ist die Adresse belegt oder der Router nicht erreichbar, bleibt es bei DHCP.</p>
+</div>
+<p class="hint" id="ipNote" hidden></p>
 <div class="row">
 <button type="button" class="sec" id="scanBtn">Netze suchen</button>
 <button type="submit">Speichern &amp; neu starten</button>
@@ -429,7 +449,7 @@ function show(v){
 window.onhashchange=()=>show(location.hash.slice(1));
 
 /* ---------- Status ---------- */
-let hostTouched=false;
+let hostTouched=false,ipTouched=false,lastWifi=null;
 async function refresh(){
   try{
     const r=await fetch('/api/status',{cache:'no-store'});
@@ -464,6 +484,11 @@ async function refresh(){
     set('fw_part',j.gateway.partition+' · '+j.gateway.image_state);
     $('wifiPill').textContent=(modes[w.mode]||w.mode)+' · '+w.ip;
     if(!hostTouched){$('hostAuto').checked=w.hostname_auto!==false;$('hostname').value=w.hostname;$('hostname').disabled=$('hostAuto').checked}
+    lastWifi=w;
+    set('w_ipmode',w.static?'fest':(w.cfg&&w.cfg.pending?'DHCP (feste IP '+w.cfg.ip+' wird geprüft)':'DHCP'));
+    if(!ipTouched&&w.cfg){$('ipStatic').checked=!!w.cfg.ip;$('ipBox').hidden=!w.cfg.ip;
+      $('ipAddr').value=w.cfg.ip;$('ipMask').value=w.cfg.mask;$('ipGw').value=w.cfg.gw;$('ipDns1').value=w.cfg.dns1;$('ipDns2').value=w.cfg.dns2}
+    $('ipNote').hidden=!w.ip_note;$('ipNote').textContent=w.ip_note||'';
   }catch(e){$('wifiPill').textContent='keine Verbindung'}
 }
 
@@ -583,13 +608,75 @@ $('ssidSel').onchange=e=>{if(e.target.value)$('ssid').value=e.target.value};
 $('hostname').oninput=()=>hostTouched=true;
 $('hostAuto').onchange=()=>{hostTouched=true;$('hostname').disabled=$('hostAuto').checked;if(!$('hostAuto').checked)$('hostname').focus()};
 $('scanBtn').onclick=scan;
+/* Feste IP (E40) */
+// ipTouched, lastWifi: siehe hostTouched (Status-Refresh)
+const ipRe=/^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
+['ipAddr','ipMask','ipGw','ipDns1','ipDns2'].forEach(id=>$(id).addEventListener('input',()=>ipTouched=true));
+$('ipStatic').onchange=()=>{
+  ipTouched=true;const on=$('ipStatic').checked;$('ipBox').hidden=!on;
+  if(on&&!$('ipAddr').value&&lastWifi&&lastWifi.mode==='station'){   // aktuelle DHCP-Werte als Vorschlag
+    $('ipAddr').value=lastWifi.ip;$('ipMask').value=lastWifi.mask||'255.255.255.0';$('ipGw').value=lastWifi.gw||'';
+    if(lastWifi.dns&&lastWifi.dns!==lastWifi.gw)$('ipDns1').value=lastWifi.dns;
+  }
+  if(on)$('ipAddr').focus();
+};
+function ipFields(){
+  const f={ip:$('ipAddr').value.trim(),mask:$('ipMask').value.trim(),gw:$('ipGw').value.trim(),dns1:$('ipDns1').value.trim(),dns2:$('ipDns2').value.trim()};
+  if(!ipRe.test(f.ip))return {err:'IP-Adresse ungültig'};
+  if(!ipRe.test(f.mask))return {err:'Subnetzmaske ungültig'};
+  if(!ipRe.test(f.gw))return {err:'Gateway (Router) ungültig'};
+  if(f.dns1&&!ipRe.test(f.dns1))return {err:'DNS 1 ungültig'};
+  if(f.dns2&&!ipRe.test(f.dns2))return {err:'DNS 2 ungültig'};
+  return f;
+}
+// Belegung prüfen: {state,detail}; state present/absent/own/uncheckable
+async function ipProbe(ip){
+  const r=await fetch('/api/wifi/checkip',{method:'POST',body:new URLSearchParams({ip})});
+  if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||('Fehler '+r.status))}
+  for(let i=0;i<30;i++){
+    await new Promise(res=>setTimeout(res,500));
+    const j=await (await fetch('/api/wifi/checkip',{cache:'no-store'})).json();
+    if(j.state!=='running')return j;
+  }
+  throw new Error('Prüfung dauert zu lange');
+}
+const ipStateText={present:'BELEGT',absent:'frei',own:'ist die aktuelle Adresse des Gateways',uncheckable:'nicht prüfbar'};
+$('ipCheckBtn').onclick=async()=>{
+  const f=ipFields();
+  if(f.err){$('wifiMsg').textContent=f.err;$('wifiMsg').className='msg bad';return}
+  $('ipCheckBtn').disabled=true;$('wifiMsg').textContent='Prüfe '+f.ip+' …';$('wifiMsg').className='msg';
+  try{const j=await ipProbe(f.ip);
+    $('wifiMsg').textContent=f.ip+': '+ipStateText[j.state]+(j.detail?' – '+j.detail:'');
+    $('wifiMsg').className='msg '+(j.state==='present'?'bad':(j.state==='uncheckable'?'warn':'ok'))}
+  catch(e){$('wifiMsg').textContent=e.message;$('wifiMsg').className='msg bad'}
+  $('ipCheckBtn').disabled=false;
+};
 $('wifiForm').onsubmit=async e=>{
   e.preventDefault();
   const body=new URLSearchParams(new FormData(e.target));
   body.set('hostname',$('hostAuto').checked?'':$('hostname').value.trim());   // leer = automatisch
+  let f={ip:'',mask:'',gw:'',dns1:'',dns2:''};
+  if($('ipStatic').checked){
+    f=ipFields();
+    if(f.err){$('wifiMsg').textContent=f.err;$('wifiMsg').className='msg bad';return}
+    const known=lastWifi&&lastWifi.cfg&&lastWifi.cfg.ip===f.ip&&lastWifi.static;
+    if(!known){   // neue Adresse: vorher auf Belegung prüfen
+      $('wifiMsg').textContent='Prüfe, ob '+f.ip+' frei ist …';$('wifiMsg').className='msg';
+      let j;
+      try{j=await ipProbe(f.ip)}catch(err){j={state:'uncheckable',detail:err.message}}
+      if(j.state==='present'){$('wifiMsg').textContent=f.ip+' ist belegt ('+j.detail+'). Bitte eine freie Adresse wählen.';$('wifiMsg').className='msg bad';return}
+      if(j.state==='uncheckable'&&!confirm(f.ip+' kann von hier nicht geprüft werden ('+j.detail+').\nDas Gateway prüft nach dem Neustart selbst und bleibt bei Belegung auf DHCP.\nTrotzdem speichern?'))return;
+    }
+  }
+  Object.entries(f).forEach(([k,v])=>body.set(k,v));
   const r=await fetch('/api/wifi',{method:'POST',body});
   const j=await r.json().catch(()=>({}));
-  if(r.ok){$('wifiMsg').textContent='Gespeichert. Das Gateway startet neu und verbindet sich mit dem WLAN. Klappt das nicht innerhalb von 30 s, kommt der Installer-AP zurück.';$('wifiMsg').className='msg ok'}
+  if(r.ok){
+    ipTouched=false;
+    $('wifiMsg').textContent=f.ip
+      ?'Gespeichert. Das Gateway startet neu, meldet sich erst per DHCP an, prüft '+f.ip+' und schaltet dann um. Danach erreichbar unter http://'+f.ip+'/ – ist die Adresse belegt oder der Router nicht erreichbar, bleibt es bei DHCP (Grund im Ereignis-Log).'
+      :'Gespeichert. Das Gateway startet neu und verbindet sich mit dem WLAN. Klappt das nicht innerhalb von 30 s, kommt der Installer-AP zurück.';
+    $('wifiMsg').className='msg ok'}
   else{$('wifiMsg').textContent=j.error||('Fehler '+r.status);$('wifiMsg').className='msg bad'}
 };
 $('rebootBtn').onclick=async()=>{if(!confirm('Gateway neu starten?'))return;await fetch('/api/reboot',{method:'POST'});$('wifiMsg').textContent='Neustart …';$('wifiMsg').className='msg warn'};
@@ -787,12 +874,12 @@ function smRender(){
     const tr=document.createElement('tr');
     const td=(t,cls)=>{const e=document.createElement('td');if(cls)e.className=cls;if(t!==undefined)e.textContent=t;tr.appendChild(e);return e};
     td(dev.name+' · '+r.path+(r.enabled?'':' (aus)'));
-    td((r.op?'< ':'> ')+r.threshold+(r.hysteresis?' (±'+r.hysteresis+')':'')+(r.minDurationS?', '+r.minDurationS+' s':'')+(r.repeatMin?', alle '+r.repeatMin+' min':''));
+    td((r.op?'< ':'> ')+r.threshold+(r.hysteresis?' (±'+r.hysteresis+')':'')+(r.minDurationS?', '+r.minDurationS+' s':'')+(r.repeatMin?', alle '+r.repeatMin+' min':'')+(r.ackRequired?', bis ACK':''));
     td(chName(r.channel));
     const z=td();
     const txt={alert:'ALARM',pending:'prüft …',normal:'normal'}[s.state]||'–';
-    z.textContent=txt+(s.value!==null&&s.value!==undefined?' ('+fmtVal(s.value)+')':'');
-    z.className=s.state==='alert'?'bad':(s.state==='pending'?'warn':'');
+    z.textContent=txt+(s.value!==null&&s.value!==undefined?' ('+fmtVal(s.value)+')':'')+(s.ack?' · ACK '+s.ack+' offen':'');
+    z.className=s.state==='alert'||s.ack?'bad':(s.state==='pending'?'warn':'');
     const a=td();
     [['Test',async()=>{try{await postForm('/api/sm/test',{idx:i});$('srMsg').textContent='Testnachricht gesendet';$('srMsg').className='msg ok';setTimeout(smLogFeed.poll,600)}
         catch(e){$('srMsg').textContent=e.message;$('srMsg').className='msg bad'}}],
@@ -810,6 +897,22 @@ function smRender(){
   if(!$('srPath').dataset.keep)fillPaths();
   $('ssLimit').textContent='Gesendet in der letzten Stunde: '+st.limit.used+' von '+st.limit.max+'.';
   pgRender(st);
+  ackRender(st);
+}
+function ackRender(st){
+  const acks=st.acks||[],tb=$('ackBody');tb.innerHTML='';
+  $('ackSec').hidden=!acks.length;
+  acks.slice().sort((a,b)=>b.ageS-a.ageS).forEach(a=>{
+    const tr=document.createElement('tr');
+    const td=(t,cls)=>{const e=document.createElement('td');if(cls)e.className=cls;if(t!==undefined)e.textContent=t;tr.appendChild(e);return e};
+    td(String(a.id),'mono');td(a.text+(a.cleared?' (inzw. OK)':''));td(a.channel);td(ago(a.ageS));
+    td(a.repeats+' von '+a.max+(a.repeats>=a.max?' (keine weitere)':''));
+    const b=document.createElement('button');b.type='button';b.className='chip';b.textContent='bestätigen';
+    b.onclick=async()=>{try{await postForm('/api/sm/ack',{id:a.id});$('ackMsg').textContent='ACK '+a.id+' bestätigt';$('ackMsg').className='msg ok';smLoad()}
+      catch(e){$('ackMsg').textContent=e.message;$('ackMsg').className='msg bad'}};
+    td().appendChild(b);
+    tb.appendChild(tr);
+  });
 }
 function fillPaths(want){
   const s=smDevStatus(parseInt($('srDev').value));
@@ -870,12 +973,12 @@ function smRuleEdit(i){
   smEditRule=i;const r=smCfg.rules[i];
   $('srDev').value=r.device;fillPaths(r.path);$('srOp').value=r.op;$('srThr').value=r.threshold;$('srHyst').value=r.hysteresis;
   $('srMin').value=r.minDurationS;$('srRep').value=r.repeatMin;fillChSelect($('srCh'),'Alarmkanal (Standard)',r.channel);$('srText').value=r.text;
-  $('srRec').checked=r.notifyRecovery;$('srEn').checked=r.enabled;$('srPath').dataset.keep='1';
+  $('srRec').checked=r.notifyRecovery;$('srAck').checked=!!r.ackRequired;$('srEn').checked=r.enabled;$('srPath').dataset.keep='1';
   $('smRuleTitle').textContent='Regel bearbeiten';$('srCancel').hidden=false;
 }
 function smRuleReset(){
   smEditRule=-1;$('srThr').value='';$('srHyst').value='0.5';$('srMin').value=0;$('srRep').value=0;$('srCh').value='';$('srText').value='';
-  $('srRec').checked=$('srEn').checked=true;delete $('srPath').dataset.keep;$('smRuleTitle').textContent='Regel hinzufügen';$('srCancel').hidden=true;fillPaths('');
+  $('srRec').checked=$('srEn').checked=true;$('srAck').checked=false;delete $('srPath').dataset.keep;$('smRuleTitle').textContent='Regel hinzufügen';$('srCancel').hidden=true;fillPaths('');
 }
 $('srCancel').onclick=smRuleReset;
 $('srPath').onchange=()=>{$('srPath').dataset.keep='1'};
@@ -885,7 +988,7 @@ $('srSave').onclick=async()=>{
   if(isNaN(thr)){$('srMsg').textContent='Grenzwert angeben';$('srMsg').className='msg bad';return}
   const r={device:parseInt($('srDev').value),path:$('srPath').value,op:parseInt($('srOp').value),threshold:thr,
     hysteresis:Math.abs(parseFloat($('srHyst').value)||0),minDurationS:parseInt($('srMin').value)||0,repeatMin:parseInt($('srRep').value)||0,
-    channel:$('srCh').value,notifyRecovery:$('srRec').checked,text:$('srText').value.trim(),enabled:$('srEn').checked};
+    channel:$('srCh').value,notifyRecovery:$('srRec').checked,text:$('srText').value.trim(),ackRequired:$('srAck').checked,enabled:$('srEn').checked};
   const c=smCfgForSave();
   if(smEditRule>=0)c.rules[smEditRule]=r;else{if(c.rules.length>=16){$('srMsg').textContent='Maximal 16 Regeln';$('srMsg').className='msg bad';return}c.rules.push(r)}
   if(await smSave(c,$('srMsg'),smEditRule>=0?'Regel gespeichert':'Regel angelegt'))smRuleReset();
@@ -902,15 +1005,16 @@ function pgRender(st){
     const td=(t,cls)=>{const e=document.createElement('td');if(cls)e.className=cls;if(t!==undefined)e.textContent=t;tr.appendChild(e);return e};
     td(p.name+(p.enabled?'':' (aus)'));
     td(p.host+(s.ip&&s.ip!==p.host?' ('+s.ip+')':''),'mono');
-    td(p.thresholdS+' s / alle '+(p.intervalS||10)+' s');
+    td(p.thresholdS+' s / alle '+(p.intervalS||10)+' s'+(p.ackRequired?', bis ACK':''));
     const z=td();
     if(!p.enabled)z.textContent='deaktiviert';
     else if(s.state==='up'){z.textContent='✓ '+s.rttMs+' ms';z.className='ok'}
     else if(s.state==='down'){z.textContent='ALARM: seit '+ago(s.noReplyS)+' keine Antwort';z.className='bad'}
     else if(s.state==='failing'){z.textContent='✗ '+(s.error||'keine Antwort')+' ('+ago(s.noReplyS)+')';z.className='warn'}
     else z.textContent='wartet …';
+    if(s.ack){z.textContent+=' · ACK '+s.ack+' offen';z.className='bad'}
     const a=td();
-    [['bearbeiten',()=>{pgEdit=i;$('pgName').value=p.name;$('pgHost').value=p.host;$('pgThr').value=p.thresholdS;$('pgIv').value=p.intervalS||10;$('pgEn').checked=p.enabled;
+    [['bearbeiten',()=>{pgEdit=i;$('pgName').value=p.name;$('pgHost').value=p.host;$('pgThr').value=p.thresholdS;$('pgIv').value=p.intervalS||10;$('pgAck').checked=!!p.ackRequired;$('pgEn').checked=p.enabled;
         $('pgTitle').textContent='Ping-Ziel bearbeiten: '+p.name;$('pgCancel').hidden=false}],
      ['löschen',async()=>{if(!confirm('Ping-Ziel '+p.name+' löschen?'))return;const c=smCfgForSave();c.pings.splice(i,1);await smSave(c,$('pgMsg'),'Ping-Ziel gelöscht')}]]
       .forEach(([t,f])=>{const b=document.createElement('button');b.type='button';b.className='chip';b.textContent=t;b.onclick=f;a.appendChild(b)});
@@ -918,10 +1022,10 @@ function pgRender(st){
   });
   $('pgEmpty').hidden=pings.length>0;
 }
-function pgReset(){pgEdit=-1;$('pgName').value=$('pgHost').value='';$('pgThr').value=60;$('pgIv').value=10;$('pgEn').checked=true;$('pgTitle').textContent='Ping-Ziel hinzufügen';$('pgCancel').hidden=true}
+function pgReset(){pgEdit=-1;$('pgName').value=$('pgHost').value='';$('pgThr').value=60;$('pgIv').value=10;$('pgAck').checked=false;$('pgEn').checked=true;$('pgTitle').textContent='Ping-Ziel hinzufügen';$('pgCancel').hidden=true}
 $('pgCancel').onclick=pgReset;
 $('pgSave').onclick=async()=>{
-  const p={name:$('pgName').value.trim(),host:$('pgHost').value.trim(),thresholdS:parseInt($('pgThr').value)||0,intervalS:parseInt($('pgIv').value)||0,enabled:$('pgEn').checked};
+  const p={name:$('pgName').value.trim(),host:$('pgHost').value.trim(),thresholdS:parseInt($('pgThr').value)||0,intervalS:parseInt($('pgIv').value)||0,ackRequired:$('pgAck').checked,enabled:$('pgEn').checked};
   if(!p.name){$('pgMsg').textContent='Bezeichner angeben (Pflicht)';$('pgMsg').className='msg bad';return}
   if(!p.host){$('pgMsg').textContent='Name oder IP angeben';$('pgMsg').className='msg bad';return}
   const c=smCfgForSave();c.pings=c.pings||[];
@@ -1296,7 +1400,7 @@ $('bkFile').onchange=async e=>{
       (bkChannels.length?'\n\nKanäle: '+bkChannels.map(c=>c.name+(c.scope?' ['+c.scope+']':'')).join(', '):'')+
       (bkSm?'\nÜberwachung: '+bkSm.devices.length+' Geräte, '+bkSm.rules.length+' Regeln, '+(bkSm.pings||[]).length+' Ping-Ziele':'')+
       (acl?'\nZugriffsliste: '+acl+' Einträge':'')+
-      (bkGw?'\nGateway: Hostname '+(bkGw.hostname&&bkGw.hostname!=='meshcore-gw'?bkGw.hostname:'automatisch (wie Gerätename)')+', WLAN „'+bkGw.wifi.ssid+'“'+(typeof bkGw.wifi.pass==='string'?' (mit Passwort)':' (ohne Passwort)'):'')+
+      (bkGw?'\nGateway: Hostname '+(bkGw.hostname&&bkGw.hostname!=='meshcore-gw'?bkGw.hostname:'automatisch (wie Gerätename)')+', WLAN „'+bkGw.wifi.ssid+'“'+(typeof bkGw.wifi.pass==='string'?' (mit Passwort)':' (ohne Passwort)')+(bkGw.wifi.ip?', feste IP '+bkGw.wifi.ip:''):'')+
       (bkAdm?'\nAdmin-Passwort: enthalten':'');
     $('bkRestore').disabled=false;$('bkMsg').textContent=bkCmds.length+' Befehle bereit';$('bkMsg').className='msg';
   }catch(err){$('bkMsg').textContent='Datei ungültig: '+err.message;$('bkMsg').className='msg bad'}
@@ -1325,7 +1429,8 @@ $('bkRestore').onclick=async()=>{
     if(adm||wifi){   // zuletzt: danach gilt der alte Login nicht mehr bzw. Neustart
       const p={};
       if(adm)p.adminPassword=bkAdm;
-      if(wifi){p.ssid=bkGw.wifi.ssid;p.hostname=bkGw.hostname||'';if(typeof bkGw.wifi.pass==='string')p.pass=bkGw.wifi.pass}
+      if(wifi){p.ssid=bkGw.wifi.ssid;p.hostname=bkGw.hostname||'';if(typeof bkGw.wifi.pass==='string')p.pass=bkGw.wifi.pass;
+        if(typeof bkGw.wifi.ip==='string')['ip','mask','gw','dns1','dns2'].forEach(k=>p[k]=bkGw.wifi[k]||'')}   // ab 0.9.0, leer = DHCP
       try{await postForm('/api/backup/apply',p);tail=(adm?' · Admin-Passwort übernommen, bitte neu anmelden':'')+(wifi?' · WLAN übernommen, Neustart':'')}
       catch(e){bad++;tail=' · '+e.message}
     }

@@ -41,7 +41,23 @@ public:
   // (SNTP startet automatisch, sobald die Station eine IP hat).
   bool takeTimeSynced();
 
+  // Feste IP (E40): true = gerade aktiv (nicht DHCP)
+  bool staticActive() const { return _staticActive; }
+  // Ergebnis der letzten Prüfung einer neuen festen IP (leer = keins).
+  // Nur loopTask schreibt; Web liest eine Kopie.
+  String ipNote() const;
+
 private:
+  void applyStaticIp();
+  void useDhcp();
+  void ipCheckLoop(unsigned long now);
+  void setIpNote(const String& n);
+  enum class IpPhase : uint8_t { NONE, WAIT_DHCP, CHECK_ADDR, SETTLE, CHECK_GW };
+  IpPhase _ipPhase = IpPhase::NONE;
+  unsigned long _ipPhaseMs = 0;
+  bool _staticActive = false;
+  char _ipNote[96] = {0};
+
   void startInstallerAp();
   String wantedHostname() const;
   void followDeviceName(unsigned long now);

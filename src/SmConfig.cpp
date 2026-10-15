@@ -98,6 +98,7 @@ static bool parse(const char* json, size_t len, const Config& old, Config& c, St
     cpy(x.channel, sizeof(x.channel), r["channel"] | "");
     x.notifyRecovery = r["notifyRecovery"] | true;
     cpy(x.text, sizeof(x.text), r["text"] | "");
+    x.ackRequired = r["ackRequired"] | false;
     if (x.device != INTERNAL_DEVICE && (x.device < 0 || x.device >= MAX_DEVICES || !c.devices[x.device].used)) {
       err = "Regel " + String(i + 1) + ": Gerät ungültig"; return false;
     }
@@ -127,6 +128,7 @@ static bool parse(const char* json, size_t len, const Config& old, Config& c, St
     }
     x.thresholdS = (uint16_t)thr;
     x.intervalS = (uint16_t)iv;
+    x.ackRequired = pg["ackRequired"] | false;
     i++;
   }
   return true;
@@ -175,6 +177,7 @@ static void serialize(const Config& c, String& out, bool maskPass) {
     r["channel"] = x.channel;
     r["notifyRecovery"] = x.notifyRecovery;
     r["text"] = x.text;
+    r["ackRequired"] = x.ackRequired;
   }
   JsonArray pings = doc["pings"].to<JsonArray>();
   for (int i = 0; i < MAX_PINGS; i++) {
@@ -186,6 +189,7 @@ static void serialize(const Config& c, String& out, bool maskPass) {
     p["host"] = x.host;
     p["thresholdS"] = x.thresholdS;
     p["intervalS"] = x.intervalS;
+    p["ackRequired"] = x.ackRequired;
   }
   // ArduinoJson 7 ersetzt den Inhalt eines String-Ziels statt anzuhängen -> erst in ein
   // eigenes String, sonst gehen die Teile davor verloren ({"config": in /api/sm, Backup).

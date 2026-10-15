@@ -99,6 +99,19 @@ Beim allerersten Start übernimmt das Gateway die **Empfehlungen für Deutschlan
 Fällt das Heim-WLAN später länger als 5 Minuten aus, öffnet das Gateway den Hotspot wieder und versucht parallel
 weiter, ins Heimnetz zu kommen. Der Repeater läuft dabei ununterbrochen weiter.
 
+**Feste IP-Adresse** (ab 0.9.0, sonst DHCP): Unter System → WLAN den Haken „feste IP-Adresse“ setzen. Die Felder
+sind mit den aktuellen DHCP-Werten vorbelegt. Nötig sind IP-Adresse, Subnetzmaske und Gateway (Router); DNS 1 leer
+heißt: der Router ist DNS-Server, DNS 2 ist optional.
+- **„Adresse prüfen“** und beim Speichern prüft das Gateway per ARP und Ping, ob die Adresse schon belegt ist.
+  Belegt (mit MAC des anderen Geräts) → wird nicht gespeichert. Liegt die Adresse in einem anderen Subnetz als das
+  aktuelle WLAN, kann sie von dort nicht geprüft werden; nach Rückfrage wird trotzdem gespeichert.
+- Nach dem Neustart meldet sich das Gateway **erst per DHCP** an, prüft die Adresse noch einmal, schaltet dann um
+  und testet, ob der Router antwortet. Ist die Adresse belegt oder der Router nicht erreichbar, **bleibt es bei
+  DHCP** und die feste IP wird verworfen; der Grund steht im Ereignis-Log und im WLAN-Bereich.
+- Status → WLAN zeigt unter „Adressvergabe“, ob DHCP oder die feste IP aktiv ist. Die Einstellung ist im Backup.
+- Die Adresse am besten außerhalb des DHCP-Bereichs des Routers wählen (Fritzbox: Heimnetz → Netzwerk →
+  IPv4-Einstellungen), sonst kann der Router sie später an ein anderes Gerät vergeben.
+
 ### 4.2 Admin-Passwort ändern – sofort
 
 **Einstellungen → Admin-Passwort.** Das Werkspasswort `password` kennt jeder. Es gilt für die Weboberfläche **und**
@@ -207,13 +220,31 @@ Nach dem Einrichten über **Überwachung → Regel → Test** prüfen, ob die Me
 | **Status** | Knoten, Funk (Rauschpegel, letzte RSSI/SNR), Paketzähler, WLAN, Chiptemperatur, **Nachbarn** |
 | **Konsole** | Offizielle MeshCore-CLI (`get …`, `set …`, `neighbors`, `advert`, `region …`). Kritische Befehle (z. B. `erase`) fragen nach. |
 | **Kanäle** | Kanäle anlegen (Hashtag, privat mit Schlüssel aus der App, Public), Nachrichten lesen und senden. Max. 8 Kanäle. |
-| **Überwachung** | Sensormeter im LAN, Regeln mit Grenzwert, Hysterese und Entwarnung; Ping-Ziele; Chiptemperatur als „Gateway (intern)“. Meldungen gehen in den gewählten Kanal. |
+| **Überwachung** | Sensormeter im LAN, Regeln mit Grenzwert, Hysterese und Entwarnung; Ping-Ziele; Chiptemperatur als „Gateway (intern)“. Meldungen gehen in den gewählten Kanal, auf Wunsch „aktiv bis bestätigt“ (siehe unten). |
 | **Pakete** | Live-Mitschnitt der empfangenen/gesendeten Pakete |
 | **Einstellungen** | MeshCore-Einstellungen, Empfehlung, Regionen, Admin-Passwort, Backup |
 | **System** | WLAN, Firmware-Update, Ereignis-Log (Download, max. 128 KB im Flash) |
 
 **Display** (Taste PRG, Auto-Aus nach 60 s): 1 Netz (Name, WLAN, IP) · 2 Funk · 3 Mesh (Pakete, Uhrzeit) ·
 4 neueste Kanalnachricht bzw. Alarm.
+
+**Alarme „aktiv bis bestätigt“** (ab 0.9.0, je Regel und je Ping-Ziel ein Haken): Kanalnachrichten haben keine
+Empfangsbestätigung und werden nicht gespeichert, wer gerade nicht im Mesh ist, verpasst sie. Mit dem Haken bekommt
+der Alarm eine Nummer, z. B. `[ACK 3] ALARM Heizraum: Temperatur 31°C (>30°C)`, und wird nach **5, 15 und 30
+Minuten** wiederholt (`[ACK 3] WDH 1/3: …`), bis jemand **im selben Kanal** antwortet:
+- `ACK` bestätigt alle offenen Alarme in diesem Kanal, `ACK 3` nur Nummer 3 (Groß-/Kleinschreibung egal, eine
+  Antwort per „Antworten“ in der App mit `@[Gateway-Name]` davor geht auch). Ganze Sätze wie „ack, schau ich mir
+  an“ zählen absichtlich nicht.
+- Das Gateway antwortet mit `ACK 3 bestätigt (Name)`, damit alle im Kanal es sehen.
+- Unter Überwachung → **Offene Bestätigungen** stehen alle offenen Alarme; „bestätigen“ dort wirkt wie ein ACK im
+  Kanal (Rückmeldung „bestätigt (Web)“).
+- Geht der Wert vorher wieder in Ordnung, laufen die Wiederholungen weiter, mit Zusatz „(inzw. OK)“.
+- Nach drei Wiederholungen ist Schluss; bestätigen geht noch 24 Stunden. Wiederholungen zählen zum Sendelimit
+  pro Stunde; ist es erreicht, wird die Wiederholung 5 Minuten später nachgeholt.
+- Die offenen Alarme stehen nur im RAM: ein Neustart des Gateways vergisst sie (steht der Alarm dann noch an,
+  wird er neu gemeldet).
+- Antwort per **Direktnachricht** an das Gateway geht nicht: ein Repeater nimmt Direktnachrichten nur von
+  angemeldeten Admins/Gästen an. Deshalb im Kanal antworten.
 
 **Private Kanäle** aus der App übernehmen: In der App den Kanal teilen bzw. den Schlüssel anzeigen (32 Hex-Zeichen)
 und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.

@@ -325,6 +325,56 @@ class FakeSm:
         self.dev_state = []
         self.rule_state = []
         self.sent = 0
+        self.acks = []        # wie ack::Tracker (E39)
+        self.ack_last = 0
+
+    # --- Bestätigungspflicht (E39), Logik wie src/AckTracker.cpp ---
+    def open_ack(self, kind, src, channel, text):
+        self.acks = [a for a in self.acks if not (a['kind'] == kind and a['src'] == src)]
+        used = {a['id'] for a in self.acks}
+        while True:
+            self.ack_last = 1 if self.ack_last >= 99 else self.ack_last + 1
+            if self.ack_last not in used: break
+        self.acks.append({'id': self.ack_last, 'kind': kind, 'src': src, 'channel': channel, 'text': text,
+                          't': time.time(), 'repeats': 0, 'cleared': False})
+        return self.ack_last
+
+    def ack_of(self, kind, src):
+        return next((a['id'] for a in self.acks if a['kind'] == kind and a['src'] == src), 0)
+
+    @staticmethod
+    def parse_ack(body):
+        m = re.fullmatch(r'\s*(?:@\[[^\]]*\]\s*)?ack[\s#]*(\d{1,2})?[\s.!]*', body, re.I)
+        if not m: return None
+        n = int(m.group(1)) if m.group(1) else 0
+        return n if (m.group(1) is None or 1 <= n <= 99) else None
+
+    def on_channel_text(self, channel, text):
+        sender, _, body = text.partition(': ')
+        if not _: sender, body = '?', text
+        want = self.parse_ack(body)
+        if want is None: return
+        hit = [a for a in self.acks if a['channel'] == channel and (not want or a['id'] == want)]
+        if not hit:
+            push('smlog', 'S', '%s: "%s" von %s - nichts Offenes dazu' % (channel, body, sender)); return
+        self.acks = [a for a in self.acks if a not in hit]
+        ids = ','.join(str(a['id']) for a in hit)
+        self.emit(channel, 'ACK %s bestätigt (%s)' % (ids, sender), False)
+        push('smlog', 'S', '[ACK %s] bestätigt von %s in %s' % (ids, sender, channel))
+
+    def ack_web(self, i):
+        a = next((x for x in self.acks if x['id'] == i), None)
+        if not a: return 'Nummer nicht (mehr) offen'
+        self.acks.remove(a)
+        self.emit(a['channel'], 'ACK %d bestätigt (Web)' % i, False)
+        push('smlog', 'S', '[ACK %d] in der Weboberfläche bestätigt' % i)
+        return None
+
+    def repeat_all(self):
+        for a in self.acks:
+            if a['repeats'] >= 3: continue
+            self.emit(a['channel'], '[ACK %d] WDH %d/3%s: %s' % (a['id'], a['repeats'] + 1, ' (inzw. OK)' if a['cleared'] else '', a['text']))
+            a['repeats'] += 1
 
     def save(self, j):
         devs = j.get('devices', [])
@@ -433,7 +483,11 @@ class FakeSm:
             if viol and rs['state'] != 'alert':
                 rs['state'] = 'alert'; rs['lastEvent'] = 'ALARM'
                 tpl = r.get('text') or self.cfg['settings'].get('alertText') or '{state} {device}: {metric} {value}{unit} ({op}{threshold}{unit})'
-                self.emit(r['channel'], self.render(tpl, d['name'], r['path'], v, r['op'], r['threshold'], 'ALARM'))
+                txt = self.render(tpl, d['name'], r['path'], v, r['op'], r['threshold'], 'ALARM')
+                if r.get('ackRequired'):
+                    ch = r['channel'] or self.cfg['settings']['defaultChannel']
+                    txt = '[ACK %d] %s' % (self.open_ack('rule', ri, ch, txt), txt)
+                self.emit(r['channel'], txt)
 
     def test(self, i):
         if not (0 <= i < len(self.cfg['rules'])): return 'Regel unbekannt'
@@ -462,13 +516,15 @@ class FakeSm:
             st = 'unknown' if not s.get('checked') else ('down' if s.get('down') else ('up' if s.get('lastOkFlag') else 'failing'))
             pst.append({'idx': i, 'state': st, 'rttMs': s.get('rtt') if s.get('lastOkFlag') else None,
                         'noReplyS': int(now - s.get('lastOk', now)) if s.get('checked') and not s.get('lastOkFlag') else None,
-                        'ip': '', 'error': s.get('error', '')})
+                        'ip': '', 'error': s.get('error', ''), 'ack': self.ack_of('ping', i)})
         self.evaluate(INTERNAL, 'Gateway', self.internal_values())   # wie der Poller alle 60 s
-        rules = [{'idx': i, 'state': s['state'], 'value': s['value'], 'lastEvent': s['lastEvent'], 'lastEventAgoS': None}
-                 for i, s in enumerate(self.rule_state)]
+        rules = [{'idx': i, 'state': s['state'], 'value': s['value'], 'lastEvent': s['lastEvent'], 'lastEventAgoS': None,
+                  'ack': self.ack_of('rule', i)} for i, s in enumerate(self.rule_state)]
+        acks = [{'id': a['id'], 'kind': a['kind'], 'src': a['src'], 'channel': a['channel'], 'text': a['text'],
+                 'ageS': int(now - a['t']), 'repeats': a['repeats'], 'max': 3, 'cleared': a['cleared']} for a in self.acks]
         internal = {'idx': INTERNAL, 'polled': True, 'online': True, 'offline': False, 'fails': 0, 'lastOkAgoS': 3,
                     'error': '', 'values': self.internal_values()}
-        return {'config': c, 'status': {'devices': devs, 'internal': internal, 'rules': rules, 'pings': pst,
+        return {'config': c, 'status': {'devices': devs, 'internal': internal, 'rules': rules, 'pings': pst, 'acks': acks,
                                         'limit': {'used': self.sent, 'max': self.cfg['settings']['maxPerHour']}}}
 
 
@@ -583,7 +639,35 @@ for i in range(5):
 
 
 # hostname '' = automatisch, folgt dem Gerätenamen (E32)
-gwcfg = {'ssid': 'TestNetz', 'pass': 'geheim123', 'hostname': '', 'reboots': 0}
+gwcfg = {'ssid': 'TestNetz', 'pass': 'geheim123', 'hostname': '', 'reboots': 0,
+         'ip': '', 'mask': '', 'gw': '', 'dns1': '', 'dns2': '', 'pending': False}
+IP_RE = re.compile(r'^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$')
+ipcheck = {'state': 'idle', 'detail': ''}
+
+
+def mock_probe(ip):
+    # wie net_check::probe gegen das Mock-Netz 192.168.1.0/24 (Gateway .50, belegt: .1 Router und .99)
+    if ip == '192.168.1.50': return 'own', 'aktuelle Adresse des Gateways'
+    if not ip.startswith('192.168.1.'): return 'uncheckable', 'anderes Subnetz als 192.168.1.50'
+    if ip in ('192.168.1.1', '192.168.1.99'): return 'present', 'antwortet auf ARP (MAC 11:22:33:44:55:66)'
+    return 'absent', 'keine Antwort auf ARP und Ping'
+
+
+def apply_ip(f):
+    # wie GatewayConfig::applyIp (vereinfacht). Rückgabe Fehlertext oder None
+    ip = f('ip').strip()
+    if not ip:
+        gwcfg.update(ip='', mask='', gw='', dns1='', dns2='', pending=False); return None
+    vals = {k: f(k).strip() for k in ('ip', 'mask', 'gw', 'dns1', 'dns2')}
+    if not IP_RE.match(vals['ip']): return 'IP-Adresse ungültig'
+    if not IP_RE.match(vals['mask']): return 'Subnetzmaske ungültig (z. B. 255.255.255.0)'
+    if not IP_RE.match(vals['gw']): return 'Gateway (Router) ungültig'
+    n = lambda s: [int(x) for x in s.split('.')]
+    m, a, g = n(vals['mask']), n(vals['ip']), n(vals['gw'])
+    if [x & y for x, y in zip(a, m)] != [x & y for x, y in zip(g, m)]: return 'Gateway liegt nicht im Subnetz der IP-Adresse'
+    if ip != gwcfg['ip']: gwcfg['pending'] = True
+    gwcfg.update(vals)
+    return None
 
 
 def sanitize_host(name):
@@ -629,18 +713,23 @@ class H(BaseHTTPRequestHandler):
             p = cli.p
             return self.send_json({'gateway': {'version': GW_VERSION, 'uptime_ms': 1000, 'free_heap': 180000, 'cpu_mhz': 240, 'chip_temp_c': CHIP_TEMP,
                                    'project': GW_PROJECT, 'partition': 'app0', 'image_state': 'gültig'},
-              'node': {'name': p['name'], 'pubkey': 'ab' * 32, 'role': 'repeater', 'firmware': 'v1.17.1', 'build_date': '14 Aug 2026',
+              'node': {'name': p['name'], 'pubkey': 'ab' * 32, 'role': 'repeater', 'firmware': 'v1.18.0', 'build_date': '15 Oct 2026',
                        'lat': p['lat'], 'lon': p['lon'], 'forwarding': p['repeat'] == 'on'},
               'radio': {'freq': p['freq'], 'bw': p['bw'], 'sf': p['sf'], 'cr': p['cr'], 'tx_power': p['tx']},
               'stats_core': {'battery_mv': 0, 'uptime_secs': 3725, 'errors': 0, 'queue_len': 0},
               'stats_radio': {'noise_floor': -112, 'last_rssi': -90, 'last_snr': 7.5, 'tx_air_secs': 3, 'rx_air_secs': 12},
               'stats_packets': {'recv': 10, 'sent': 5, 'flood_tx': 5, 'direct_tx': 0, 'flood_rx': 10, 'direct_rx': 0, 'recv_errors': 0},
-              'wifi': {'mode': 'station', 'ssid': gwcfg['ssid'], 'ip': '192.168.1.50', 'rssi': -55, 'mac': 'AA:BB:CC:DD:EE:FF', 'hostname': eff_host(), 'hostname_auto': not gwcfg['hostname']}})
+              'wifi': {'mode': 'station', 'ssid': gwcfg['ssid'], 'ip': '192.168.1.50', 'rssi': -55, 'mac': 'AA:BB:CC:DD:EE:FF', 'hostname': eff_host(), 'hostname_auto': not gwcfg['hostname'],
+                       'static': False, 'mask': '255.255.255.0', 'gw': '192.168.1.1', 'dns': '192.168.1.1',
+                       'cfg': {k: gwcfg[k] for k in ('ip', 'mask', 'gw', 'dns1', 'dns2', 'pending')}, 'ip_note': ''}})
+        if u.path == '/api/wifi/checkip':
+            with lock:
+                return self.send_json(dict(ipcheck))
         if u.path == '/api/backup/extra':
             secrets = q.get('secrets', ['0'])[0] == '1'
             with lock:
                 sm = json.loads(json.dumps(smm.cfg)) if secrets else smm.json()['config']
-                out = {'hostname': gwcfg['hostname'], 'wifi': {'ssid': gwcfg['ssid']},
+                out = {'hostname': gwcfg['hostname'], 'wifi': dict({'ssid': gwcfg['ssid']}, **{k: gwcfg[k] for k in ('ip', 'mask', 'gw', 'dns1', 'dns2')}),
                        'acl': [{'perm': v, 'pubkey': k} for k, v in cli.acl.items()], 'sensormeter': sm}
                 if secrets:
                     out['wifi']['pass'] = gwcfg['pass']; out['adminPassword'] = cli.p['password']
@@ -696,11 +785,41 @@ class H(BaseHTTPRequestHandler):
             if not ssid:
                 return self.send_json({'error': 'ssid fehlt'}, 400)
             with lock:
+                if 'ip' in form:
+                    err = apply_ip(lambda k: form.get(k, [''])[0])
+                    if err: return self.send_json({'error': err}, 400)
                 gwcfg['ssid'] = ssid
                 if form.get('pass', [''])[0]: gwcfg['pass'] = form['pass'][0]
                 if 'hostname' in form: gwcfg['hostname'] = host_setting(form['hostname'][0])
                 gwcfg['reboots'] += 1
             return self.send_json({'ok': True, 'reboot': True})
+        if u.path == '/api/wifi/checkip':
+            ip = form.get('ip', [''])[0].strip()
+            if not IP_RE.match(ip): return self.send_json({'error': 'IP-Adresse ungültig'}, 400)
+            with lock:
+                ipcheck.update(state='running', detail='')
+            def done(ip=ip):
+                time.sleep(0.8)
+                st, d = mock_probe(ip)
+                with lock: ipcheck.update(state=st, detail=d)
+            threading.Thread(target=done, daemon=True).start()
+            return self.send_json({'ok': True})
+        if u.path == '/api/sm/ack':
+            with lock:
+                err = smm.ack_web(int(form.get('id', ['0'])[0]))
+            return self.send_json({'error': err}, 400) if err else self.send_json({'ok': True})
+        if u.path == '/api/mock/chanmsg':   # nur Mock: Kanalnachricht "von außen" empfangen
+            f = lambda k: form.get(k, [''])[0]
+            with lock:
+                ch = smm.find(f('channel'))
+                if ch < 0: return self.send_json({'error': 'Kanal unbekannt'}, 404)
+                push('messages', 'M', '\t'.join([str(ch), f('channel'), '7.0', '1', f('text')]))
+                smm.on_channel_text(f('channel'), f('text'))
+            return self.send_json({'ok': True})
+        if u.path == '/api/mock/ackrepeat':   # nur Mock: alle offenen um eine Wiederholung weiter
+            with lock:
+                smm.repeat_all()
+            return self.send_json({'ok': True})
         if u.path == '/api/cli':
             return self.send_json({'ok': True, 'id': submit([form.get('cmd', [''])[0]], False)})
         if u.path == '/api/cli/batch':
@@ -769,6 +888,10 @@ class H(BaseHTTPRequestHandler):
                 if 'ssid' in form:
                     if 'pass' not in form and f('ssid') != gwcfg['ssid']:
                         return self.send_json({'error': 'WLAN-Passwort fehlt im Backup'}, 400)
+                    if 'ip' in form:
+                        err = apply_ip(f)
+                        if err: return self.send_json({'error': 'Backup: ' + err}, 400)
+                        if gwcfg['ip']: gwcfg['pending'] = True
                     gwcfg['ssid'] = f('ssid')
                     if 'pass' in form: gwcfg['pass'] = f('pass')
                     if 'hostname' in form: gwcfg['hostname'] = host_setting(f('hostname'))

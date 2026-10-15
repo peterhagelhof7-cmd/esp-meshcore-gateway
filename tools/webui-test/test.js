@@ -269,6 +269,57 @@ async function runCli(page, cmd) {
     await page.$$eval('#chBody tr', rows => rows.find(r => r.children[0].textContent === '#platzhalter').querySelectorAll('button.chip')[0].click());
     await until(async () => (await page.$$eval('#chBody tr', r => r.length)) === 3);
 
+    // ---------- Aktiv bis bestätigt (E39) ----------
+    await page.click('nav a[data-v=sm]');
+    await until(async () => (await rows('#smRuleBody')).length === 2);
+    check('ACK: Abschnitt anfangs versteckt', await page.$eval('#ackSec', e => e.hidden));
+    await page.select('#srDev', '0');
+    await until(async () => (await page.$$eval('#srPath option', o => o.map(x => x.value))).includes('sensor1.humidity'));
+    await page.select('#srPath', 'sensor1.humidity');
+    await setVal('#srThr', '40');
+    await setVal('#srText', '');
+    await page.select('#srCh', 'sensormeter');
+    await page.$eval('#srAck', e => { e.checked = true; });
+    await page.click('#srSave');
+    check('ACK: Regel mit Haken gespeichert', await until(async () => {
+      const c = await page.evaluate(async () => (await (await fetch('/api/sm')).json()).config); return c.rules.length === 3 && c.rules[2].ackRequired === true; }));
+    check('ACK: Formular nach Speichern ohne Haken', !(await page.$eval('#srAck', e => e.checked)));
+    let ackLog = '';
+    check('ACK: erste Meldung mit Nummer', await until(async () => /sensormeter -> \[ACK \d+\] ALARM Heizraum: /.test(ackLog = await t('#smLog'))), ackLog.slice(-200));
+    const ackId = ((await t('#smLog')).match(/sensormeter -> \[ACK (\d+)\] ALARM Heizraum/) || [])[1];
+    check('ACK: Regelzeile „bis ACK“ + „ACK n offen“', await until(async () => {
+      const r = (await rows('#smRuleBody'))[2] || []; return (r[1] || '').endsWith('bis ACK') && (r[3] || '').includes('ACK ' + ackId + ' offen'); }), JSON.stringify((await rows('#smRuleBody'))[2]));
+    check('ACK: offene Bestätigung gelistet', await until(async () => !(await page.$eval('#ackSec', e => e.hidden)) && (await rows('#ackBody')).length === 1 &&
+      (await rows('#ackBody'))[0][0] === ackId && (await rows('#ackBody'))[0][4] === '0 von 3'), JSON.stringify(await rows('#ackBody')));
+    await page.$$eval('#smRuleBody tr', r => r[2].querySelectorAll('button')[1].click());   // bearbeiten
+    check('ACK: Bearbeiten lädt Haken', await page.$eval('#srAck', e => e.checked));
+    await page.click('#srCancel');
+    await page.evaluate(() => fetch('/api/mock/ackrepeat', { method: 'POST' }));
+    check('ACK: Wiederholung WDH 1/3', await until(async () => (await t('#smLog')).includes('sensormeter -> [ACK ' + ackId + '] WDH 1/3: ALARM Heizraum')), (await t('#smLog')).slice(-200));
+    check('ACK: Zähler 1 von 3', await until(async () => ((await rows('#ackBody'))[0] || [])[4] === '1 von 3'), JSON.stringify(await rows('#ackBody')));
+    const chanMsg = text => page.evaluate(x => fetch('/api/mock/chanmsg', { method: 'POST', body: new URLSearchParams({ channel: 'sensormeter', text: x }) }), text);
+    await chanMsg('Peter: ACK 98');
+    check('ACK: falsche Nummer -> nichts Offenes', await until(async () => (await t('#smLog')).includes('"ACK 98" von Peter - nichts Offenes dazu')), (await t('#smLog')).slice(-200));
+    await chanMsg('Peter: ack, schau ich mir an');
+    await sleep(600);
+    check('ACK: Satz mit „ack“ bestätigt nicht', (await rows('#ackBody')).length === 1);
+    await chanMsg('Peter: @[Heltec Repeater] ack ' + ackId);
+    check('ACK: Antwort im Kanal bestätigt + Rückmeldung', await until(async () => (await t('#smLog')).includes('sensormeter -> ACK ' + ackId + ' bestätigt (Peter)')), (await t('#smLog')).slice(-200));
+    check('ACK: Abschnitt wieder weg, Regel ohne „offen“', await until(async () => await page.$eval('#ackSec', e => e.hidden) &&
+      !((await rows('#smRuleBody'))[2][3] || '').includes('offen')), JSON.stringify((await rows('#smRuleBody'))[2]));
+    // Neuer Alarm (Grenzwert geändert = neue Regel) -> per Weboberfläche bestätigen
+    await page.$$eval('#smRuleBody tr', r => r[2].querySelectorAll('button')[1].click());
+    await setVal('#srThr', '41');
+    await page.click('#srSave');
+    check('ACK: neuer Alarm, neue Nummer', await until(async () => (await rows('#ackBody')).length === 1 && (await rows('#ackBody'))[0][0] !== ackId), JSON.stringify(await rows('#ackBody')));
+    const ackId2 = (await rows('#ackBody'))[0][0];
+    await page.$$eval('#ackBody tr', r => r[0].querySelector('button').click());
+    check('ACK: Web-Bestätigung + Rückmeldung in den Kanal', await until(async () => (await t('#smLog')).includes('sensormeter -> ACK ' + ackId2 + ' bestätigt (Web)') &&
+      await page.$eval('#ackSec', e => e.hidden)), (await t('#smLog')).slice(-200));
+    await page.screenshot({ path: out + '/11_ack.png', fullPage: true });
+    await page.$$eval('#smRuleBody tr', r => r[2].querySelectorAll('button')[2].click());   // Regel wieder löschen
+    await until(async () => (await rows('#smRuleBody')).length === 2);
+
     // ---------- Ping-Check (E25), Alarmkanal = #test ----------
     await page.click('nav a[data-v=sm]');
     check('Tab heißt Überwachung', (await page.$eval('nav a[data-v=sm]', e => e.textContent)) === 'Überwachung');
@@ -314,6 +365,18 @@ async function runCli(page, cmd) {
       await until(async () => (await rows('#pgBody')).length === before - 1);
     }
     check('Ping: zurück auf 2 Ziele', (await rows('#pgBody')).length === 2);
+    // Ping-Ziel „aktiv bis bestätigt“ (E39)
+    await page.$$eval('#pgBody tr', r => r[0].querySelectorAll('button')[0].click());
+    check('Ping-ACK: Haken anfangs aus', !(await page.$eval('#pgAck', e => e.checked)));
+    await page.$eval('#pgAck', e => { e.checked = true; });
+    await page.click('#pgSave');
+    check('Ping-ACK: gespeichert + in Tabelle', await until(async () => ((await rows('#pgBody'))[0]?.[2] || '').endsWith('bis ACK') &&
+      (await page.evaluate(async () => (await (await fetch('/api/sm')).json()).config.pings[0].ackRequired)) === true), JSON.stringify((await rows('#pgBody'))[0]));
+    await page.$$eval('#pgBody tr', r => r[0].querySelectorAll('button')[0].click());
+    check('Ping-ACK: Bearbeiten lädt Haken', await page.$eval('#pgAck', e => e.checked));
+    await page.$eval('#pgAck', e => { e.checked = false; });
+    await page.click('#pgSave');
+    await until(async () => !((await rows('#pgBody'))[0]?.[2] || '').endsWith('bis ACK'));
     await page.screenshot({ path: out + '/11_ping.png', fullPage: true });
   }
 
@@ -513,6 +576,54 @@ async function runCli(page, cmd) {
     check('Hostname: Haken wieder an -> automatisch', await until(async () => (await st()).hostname_auto === true), JSON.stringify(await st()));
     await page.evaluate(() => fetch('/api/wifi', { method: 'POST', body: new URLSearchParams({ ssid: 'TestNetz', hostname: 'meshcore-gw' }) }));
     check('Hostname: alter Werkswert meshcore-gw = automatisch', await until(async () => (await st()).hostname_auto === true), JSON.stringify(await st()));
+
+    // ---------- Feste IP (E40) ----------
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.click('nav a[data-v=wifi]');
+    await until(async () => (await t('#w_ipmode')) === 'DHCP');
+    check('IP: Status „Adressvergabe DHCP“', (await t('#w_ipmode')) === 'DHCP', await t('#w_ipmode'));
+    check('IP: Felder anfangs versteckt', await page.$eval('#ipBox', e => e.hidden));
+    await page.$eval('#ssid', e => e.value = 'TestNetz');
+    await page.click('#ipStatic');
+    check('IP: Haken -> Felder mit aktuellen DHCP-Werten', !(await page.$eval('#ipBox', e => e.hidden)) &&
+      (await page.evaluate(() => [ipAddr.value, ipMask.value, ipGw.value, ipDns1.value].join(' '))) === '192.168.1.50 255.255.255.0 192.168.1.1 ',
+      await page.evaluate(() => [ipAddr.value, ipMask.value, ipGw.value, ipDns1.value].join(' ')));
+    const setIp = (a, gw) => page.evaluate((a, gw) => { ipAddr.value = a; if (gw) ipGw.value = gw; ipAddr.dispatchEvent(new Event('input')); }, a, gw);
+    await setIp('192.168.1.99');
+    await page.click('#ipCheckBtn');
+    check('IP: Prüfen -> belegt mit MAC', await until(async () => (await t('#wifiMsg')).includes('BELEGT')) && (await t('#wifiMsg')).includes('MAC'), await t('#wifiMsg'));
+    await setIp('192.168.1.50');
+    await page.click('#ipCheckBtn');
+    check('IP: Prüfen -> eigene Adresse', await until(async () => (await t('#wifiMsg')).includes('aktuelle Adresse des Gateways')), await t('#wifiMsg'));
+    await setIp('192.168.1.99');
+    await page.$eval('#wifiForm', f => f.requestSubmit());
+    check('IP: Speichern mit belegter Adresse abgelehnt', await until(async () => (await t('#wifiMsg')).includes('ist belegt')), await t('#wifiMsg'));
+    check('IP: belegte Adresse NICHT gespeichert', (await st()).cfg.ip === '', JSON.stringify((await st()).cfg));
+    await setIp('192.168.1.77', '10.0.0.1');
+    await page.$eval('#wifiForm', f => f.requestSubmit());
+    check('IP: Router außerhalb des Subnetzes abgelehnt', await until(async () => (await t('#wifiMsg')).includes('nicht im Subnetz')), await t('#wifiMsg'));
+    await setIp('192.168.1.77', '192.168.1.1');
+    await page.evaluate(() => { ipAddr.value = 'abc'; });
+    await page.$eval('#wifiForm', f => f.requestSubmit());
+    check('IP: ungültige Adresse im Browser abgefangen', (await t('#wifiMsg')) === 'IP-Adresse ungültig', await t('#wifiMsg'));
+    await setIp('192.168.1.77');
+    await page.$eval('#wifiForm', f => f.requestSubmit());
+    check('IP: freie Adresse gespeichert, Hinweis auf neue URL', await until(async () => (await t('#wifiMsg')).includes('http://192.168.1.77/')), await t('#wifiMsg'));
+    check('IP: Einstellung + Prüfung vorgemerkt', await until(async () => { const c = (await st()).cfg; return c.ip === '192.168.1.77' && c.gw === '192.168.1.1' && c.pending === true; }), JSON.stringify((await st()).cfg));
+    check('IP: Status zeigt „wird geprüft“', await until(async () => (await t('#w_ipmode')) === 'DHCP (feste IP 192.168.1.77 wird geprüft)'), await t('#w_ipmode'));
+    const bkIp = await page.evaluate(async () => (await (await fetch('/api/backup/extra')).json()).wifi);
+    check('IP: im Backup enthalten', bkIp.ip === '192.168.1.77' && bkIp.mask === '255.255.255.0' && bkIp.gw === '192.168.1.1', JSON.stringify(bkIp));
+    await setIp('10.1.1.5', '10.1.1.1');
+    await page.$eval('#wifiForm', f => f.requestSubmit());
+    check('IP: anderes Subnetz -> Rückfrage, dann gespeichert', await until(async () => (await st()).cfg.ip === '10.1.1.5'), JSON.stringify((await st()).cfg));
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.click('nav a[data-v=wifi]');
+    check('IP: nach Neuladen Haken + Werte aus der Einstellung', await until(async () => page.evaluate(() => ipStatic.checked && !ipBox.hidden && ipAddr.value === '10.1.1.5')));
+    await page.$eval('#ssid', e => e.value = 'TestNetz');
+    await page.click('#ipStatic');
+    await page.$eval('#wifiForm', f => f.requestSubmit());
+    check('IP: Haken weg -> wieder DHCP', await until(async () => { const c = (await st()).cfg; return c.ip === '' && c.pending === false; }), JSON.stringify((await st()).cfg));
+    await page.screenshot({ path: out + '/12_ip.png', fullPage: true });
     await page.reload({ waitUntil: 'networkidle0' });
 
     await page.click('nav a[data-v=wifi]');
