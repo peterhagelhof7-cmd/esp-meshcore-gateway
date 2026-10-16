@@ -77,6 +77,8 @@ PlatformIO, Envs `gateway_heltec_v4` und `gateway_heltec_v4_r8`. MeshCore liegt 
   wählbar), nach Bewährung `-Promote <Version>`, alte mit `-Remove <Version>`; danach `docs/fw/` committen
   und die Download-Links in `docs/admin-guide.md` Abschnitt 7 anpassen
 
+Kanal-API für andere Systeme (ab 0.10.0): [`docs/api.md`](docs/api.md).
+
 Planung und Entscheidungen: [`docs/planung.md`](docs/planung.md), [`docs/entscheidungen.md`](docs/entscheidungen.md).
 
 ## Lizenz

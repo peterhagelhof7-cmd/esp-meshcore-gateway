@@ -306,31 +306,16 @@ MeshCore-App.
 - Höchstens 8 Geräte insgesamt (Sensormeter und Repeater zusammen).
 
 **Kanal-API** (ab 0.10.0): Andere Systeme im LAN können die Kanäle und Nachrichten des Gateways lesen, z. B.
-home-central, das Nachrichten eines Kanals an Telegram weiterleitet. Der Zugriff ist nur lesend und braucht kein
-Admin-Passwort.
+home-central, das Nachrichten eines Kanals an Telegram weiterleitet, und – wenn freigegeben – in einen Kanal
+senden. Der Zugriff läuft über einen eigenen API-Schlüssel, nicht über das Admin-Passwort.
 - System → **Kanal-API** → „Schlüssel erzeugen“. Den Schlüssel (32 Hex-Zeichen) im anderen System eintragen.
   „Neu erzeugen“ macht den alten sofort ungültig, „Ausschalten“ sperrt die API. Ohne Schlüssel ist die API aus.
-- Jede Anfrage mit Header `X-API-Key: <Schlüssel>` (oder `Authorization: Bearer <Schlüssel>`):
-
-  | Anfrage | Antwort |
-  |---|---|
-  | `GET /api/v1/channels` | `boot`, `gateway` (Gerätename), `channels`: `idx`, `name`, `kind` (public/hashtag/private), `scope` – ohne Kanalschlüssel |
-  | `GET /api/v1/messages?since=0` | `boot`, `messages`, `next`, `gap` |
-  | `GET /api/v1/messages?since=<next>&channel=<Name>` | nur neue Nachrichten, optional nur aus einem Kanal |
-
-  Eine Nachricht: `seq`, `time` (Unix-Zeit des Absenders), `dir` (`rx` empfangen, `tx` vom Gateway gesendet),
-  `channelIdx`, `channel`, `sender`, `text`, `snr` (dB, bei `tx` `null`), `hops`.
-- **Abonnieren**: alle 10–30 s mit dem `next` der letzten Antwort fragen (höchstens 50 Nachrichten je Antwort; ist
-  `next` gestiegen, gleich nochmal fragen). Ändert sich `boot`, wurde das Gateway neu gestartet → wieder mit
-  `since=0` beginnen. `gap: true` heißt: dazwischen sind Nachrichten verloren gegangen (das Gateway hält die
-  letzten 200 Kanal-Zeilen im RAM).
-- Beispiel: `curl -H "X-API-Key: 0123…" "http://de-by-ort01-gw/api/v1/messages?since=0&channel=haus-alarm"`
-- **Senden** (z. B. Unwetter- und NINA/KATWARN-Warnungen von home-central): unter Kanal-API **„Senden erlauben in“**
+- **Senden** (z. B. Unwetter- und NINA/KATWARN-Warnungen von home-central): zusätzlich **„Senden erlauben in“**
   einen Kanal wählen und „Übernehmen“. Nur in diesen einen Kanal darf über die API gesendet werden, höchstens
-  **10 Nachrichten pro Stunde**. Anfrage `POST /api/v1/send` mit den Formularfeldern `channel` und `text`, Antwort
-  `{"ok":true,"truncated":false,"text":"…"}`. Zu lange Texte werden gekürzt (Platz ca. 140 Zeichen nach dem
-  Gerätenamen). Fehler: 403 nicht freigegeben/anderer Kanal, 429 Stundenlimit erreicht.
-  Beispiel: `curl -H "X-API-Key: 0123…" -d channel=warnungen -d "text=Sturmwarnung" http://de-by-ort01-gw/api/v1/send`
+  **10 Nachrichten pro Stunde**; zu lange Texte kürzt das Gateway.
+- Endpunkte, Felder, Fehlercodes, Beispiele und der Ablauf zum Abonnieren: **[Kanal-API – Referenz](api.md)**.
+  Kurz: `GET /api/v1/channels`, `GET /api/v1/messages?since=<next>`, `POST /api/v1/send`, jeweils mit Header
+  `X-API-Key: <Schlüssel>`.
 - Die Übertragung ist unverschlüsselt (HTTP), wie die ganze Weboberfläche: nur im eigenen Netz verwenden. Der
   Schlüssel ist nicht im Backup; nach einer Wiederherstellung neu erzeugen.
 
