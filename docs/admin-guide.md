@@ -222,11 +222,12 @@ und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.
 
 - **Laufendes Gateway: System → Firmware-Update**, die `firmware.bin` für dein Board hochladen und
   „Hochladen & installieren“. Alle Einstellungen bleiben. Aktuelle Dateien:
-  - bewährt 0.7.6: [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.7.6/v4/firmware.bin) ·
-    [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.7.6/r8/firmware.bin)
-  - neu, in Erprobung 0.8.0 (MeshCore 1.18.0):
+  - bewährt 0.8.0 (MeshCore 1.18.0):
     [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.8.0/v4/firmware.bin) ·
     [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.8.0/r8/firmware.bin)
+  - ältere Version 0.7.6 (MeshCore 1.17.1):
+    [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.7.6/v4/firmware.bin) ·
+    [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.7.6/r8/firmware.bin)
 
   Welches Board du hast, zeigt der Web-Flasher bei „Verbinden & prüfen“.
   - Falsches Board und ältere Versionen werden abgelehnt („Downgrade erzwingen“ nur, wenn gewollt).
