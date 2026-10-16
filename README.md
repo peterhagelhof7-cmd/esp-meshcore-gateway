@@ -43,6 +43,15 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind beide wählbar.
   schließen sich automatisch, die Annahme wird per ACK im Kanal bestätigt. Vorlage für Zabbix 7 liegt bei.
 - **Speicheranzeige:** freier Heap mit Tiefststand seit dem Start und PSRAM-Belegung im Status.
 
+## In Entwicklung (0.10.0)
+
+- **Fernkonsole:** andere Repeater im Mesh per CLI verwalten, direkt im Konsolen-Tab. Ziel aus empfangenen
+  Adverts wählen, mit dem Admin-Passwort anmelden, Befehle gehen per Funk.
+- **Entfernte Repeater überwachen:** Akku, Temperatur, Laufzeit und Rauschen anderer Repeater regelmäßig per Funk
+  abfragen (Gast-Passwort genügt). Grenzwerte, Neustart-Erkennung und „nicht erreichbar“ melden in den Alarmkanal.
+- **Kanal-API:** Kanäle und Nachrichten für andere Systeme im LAN abrufbar (nur lesend, API-Schlüssel wird auf dem
+  Gerät erzeugt), z. B. zum Weiterleiten eines Kanals nach Telegram.
+
 ## Installieren
 
 **Admin-Handbuch** (Installation, Erstinbetriebnahme, **Regionen**, Betrieb, Updates): [`docs/admin-guide.md`](docs/admin-guide.md)

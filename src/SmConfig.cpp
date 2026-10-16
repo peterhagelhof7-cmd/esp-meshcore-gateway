@@ -4,6 +4,8 @@
 #include <Preferences.h>
 #include <esp_heap_caps.h>
 
+#include "RemoteFormat.h"
+
 namespace sm {
 
 // Kurz halten: jede Nachricht kostet Airtime, und der Knotenname wird von
@@ -65,23 +67,44 @@ static bool parse(const char* json, size_t len, const Config& old, Config& c, St
 
   JsonArray devs = doc["devices"];
   if (devs.size() > MAX_DEVICES) { err = "Maximal 8 Geräte"; return false; }
+  // Gleicher Repeater zweimal würde doppelt abgefragt (und teilt sich die Anmeldung)
+  for (size_t a = 0; a < devs.size(); a++) {
+    for (size_t b = a + 1; b < devs.size(); b++) {
+      const char* ka = devs[a]["key"] | "";
+      if (*ka && !strcasecmp(devs[a]["type"] | "", "repeater") && !strcasecmp(devs[b]["type"] | "", "repeater") &&
+          !strcasecmp(ka, devs[b]["key"] | "")) {
+        err = "Derselbe Repeater ist zweimal eingetragen"; return false;
+      }
+    }
+  }
   int i = 0;
   for (JsonObject d : devs) {
     Device& x = c.devices[i];
     x.used = true;
     x.enabled = d["enabled"] | true;
     cpy(x.name, sizeof(x.name), d["name"] | "");
-    cpy(x.host, sizeof(x.host), d["host"] | "");
-    x.port = d["port"] | 80;
-    cpy(x.user, sizeof(x.user), d["user"] | "");
+    x.type = !strcmp(d["type"] | "sensormeter", "repeater") ? DEV_REPEATER : DEV_SENSORMETER;
     const char* pw = d["pass"] | "";
     int oldIdx = d["origIdx"] | -1;   // Position vor dem Bearbeiten (für "***")
     if (!strcmp(pw, "***") && oldIdx >= 0 && oldIdx < MAX_DEVICES) cpy(x.pass, sizeof(x.pass), old.devices[oldIdx].pass);
     else cpy(x.pass, sizeof(x.pass), pw);
-    x.intervalS = constrain((int)(d["intervalS"] | 60), 10, 3600);
     x.offlineAlert = d["offlineAlert"] | true;
     if (!x.name[0]) { err = "Gerät " + String(i + 1) + ": Name fehlt"; return false; }
-    if (!validHost(x.host)) { err = String("Gerät ") + x.name + ": Adresse ungültig"; return false; }
+    if (x.type == DEV_REPEATER) {
+      // E42: entfernter Repeater, Adresse = öffentlicher Schlüssel
+      if (!remote_fmt::keyFromHex(d["key"] | "", x.key)) {
+        err = String("Gerät ") + x.name + ": öffentlicher Schlüssel (64 Hex-Zeichen) fehlt oder ungültig"; return false;
+      }
+      if (strlen(x.pass) > 15) { err = String("Gerät ") + x.name + ": Passwort max. 15 Zeichen"; return false; }
+      x.intervalS = constrain((long)(d["intervalS"] | (long)REPEATER_INTERVAL_DEF_S), (long)REPEATER_INTERVAL_MIN_S,
+                              (long)REPEATER_INTERVAL_MAX_S);
+    } else {
+      cpy(x.host, sizeof(x.host), d["host"] | "");
+      x.port = d["port"] | 80;
+      cpy(x.user, sizeof(x.user), d["user"] | "");
+      x.intervalS = constrain((int)(d["intervalS"] | 60), 10, 3600);
+      if (!validHost(x.host)) { err = String("Gerät ") + x.name + ": Adresse ungültig"; return false; }
+    }
     i++;
   }
 
@@ -161,9 +184,17 @@ static void serialize(const Config& c, String& out, bool maskPass) {
     JsonObject d = devs.add<JsonObject>();
     d["enabled"] = x.enabled;
     d["name"] = x.name;
-    d["host"] = x.host;
-    d["port"] = x.port;
-    d["user"] = x.user;
+    if (x.type == DEV_REPEATER) {
+      char hex[65];
+      remote_fmt::keyToHex(x.key, hex);
+      d["type"] = "repeater";
+      d["key"] = hex;
+    } else {
+      d["type"] = "sensormeter";
+      d["host"] = x.host;
+      d["port"] = x.port;
+      d["user"] = x.user;
+    }
     d["pass"] = (maskPass && x.pass[0]) ? "***" : x.pass;
     d["intervalS"] = x.intervalS;
     d["offlineAlert"] = x.offlineAlert;

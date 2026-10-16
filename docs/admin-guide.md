@@ -218,12 +218,12 @@ Nach dem Einrichten über **Überwachung → Regel → Test** prüfen, ob die Me
 | Bereich | Wofür |
 |---|---|
 | **Status** | Knoten, Funk (Rauschpegel, letzte RSSI/SNR), Paketzähler, WLAN, Chiptemperatur, Heap und PSRAM (mit Tiefststand), **Nachbarn** |
-| **Konsole** | Offizielle MeshCore-CLI (`get …`, `set …`, `neighbors`, `advert`, `region …`). Kritische Befehle (z. B. `erase`) fragen nach. |
+| **Konsole** | [Offizielle MeshCore-CLI](https://docs.meshcore.io/cli_commands/) (`get …`, `set …`, `neighbors`, `advert`, `region …`), auch für **andere Repeater per Funk** (Fernkonsole, siehe unten). Kritische Befehle (z. B. `erase`) fragen nach. |
 | **Kanäle** | Kanäle anlegen (Hashtag, privat mit Schlüssel aus der App, Public), Nachrichten lesen und senden. Max. 8 Kanäle. |
 | **Überwachung** | Sensormeter im LAN, Regeln mit Grenzwert, Hysterese und Entwarnung; Ping-Ziele; Chiptemperatur als „Gateway (intern)“. Meldungen gehen in den gewählten Kanal, auf Wunsch „aktiv bis bestätigt“ (siehe unten). |
 | **Pakete** | Live-Mitschnitt der empfangenen/gesendeten Pakete |
 | **Einstellungen** | MeshCore-Einstellungen, Empfehlung, Regionen, Admin-Passwort, Backup |
-| **System** | WLAN, Firmware-Update, Ereignis-Log (Download, max. 128 KB im Flash) |
+| **System** | WLAN, Firmware-Update, Ereignis-Log (Download, max. 128 KB im Flash), Kanal-API-Schlüssel |
 
 **Display** (Taste PRG, Auto-Aus nach 60 s): 1 Netz (Name, WLAN, IP) · 2 Funk · 3 Mesh (Pakete, Uhrzeit) ·
 4 neueste Kanalnachricht bzw. Alarm.
@@ -279,6 +279,54 @@ Host-Präfix und Kanalfilter. „Testwert senden“ prüft die Verbindung (`mesh
 Template **MeshCore Gateway Alarme** je meldendem Gateway (Host ohne Schnittstelle, Name wie oben), Template
 **MeshCore Zabbix-Empfaenger** für den Empfänger. Ein Problem je Alarm, die Entwarnung derselben Quelle schließt es.
 Den Trigger „kein Lebenszeichen“ nur aktivieren, wenn am Gateway Lebenszeichen eingestellt sind.
+
+**Fernkonsole** (ab 0.10.0): Andere Repeater im Mesh lassen sich vom Gateway aus per CLI verwalten, so wie mit der
+MeshCore-App.
+- Konsole → oben das Ziel wählen. Die Liste füllt sich aus empfangenen Adverts (Name, Schlüsselanfang, Hops, zuletzt
+  gehört). Fehlt ein Repeater, „Schlüssel eingeben …“ wählen und seinen öffentlichen Schlüssel (64 Hex-Zeichen) eintragen.
+- Mit dem **Admin-Passwort** des Repeaters anmelden. Das Passwort wird nicht gespeichert. Mit dem Gast-Passwort
+  klappt die Anmeldung, CLI-Befehle beantwortet ein Repeater aber nur Admins.
+- Befehle gehen dann per Funk an den Repeater, im Verlauf mit `[Name]` davor. Jede Antwort dauert einige Sekunden;
+  kommt keine („keine Antwort (nochmal senden)“), einfach erneut senden. Es ist immer nur ein Befehl unterwegs.
+- Bei `reboot`, `erase`, `set prv.key` usw. nennt die Rückfrage den Ziel-Repeater.
+- „Abmelden“ oder 15 min ohne Befehl → die Konsole spricht wieder mit dem Gateway selbst.
+- Keine Antwort auf die Anmeldung heißt: Passwort falsch **oder** Repeater nicht erreichbar (ein Repeater antwortet
+  auf ein falsches Passwort gar nicht).
+
+**Entfernte Repeater überwachen** (ab 0.10.0): Überwachung → Gerät hinzufügen → Typ **Repeater (per Funk)**.
+- Repeater aus der Liste wählen (oder Schlüssel eintragen), Name, Passwort. Das **Gast-Passwort genügt**; hat der
+  Repeater keins, leer lassen.
+- Abfrage alle 3600 s (erlaubt 15 min bis 12 h). Je Abfrage gehen 2–3 kurze Pakete über Funk. Nach einem Fehlversuch
+  fragt das Gateway nach 10 min erneut; nach „Offline nach … Fehlversuchen“ kommt die Meldung „nicht erreichbar“.
+- Messwerte für Regeln: **Akku** (V), **Temperatur** (°C, meist die Chiptemperatur des Repeaters), **Laufzeit** (h),
+  **Rauschen** (dBm). Beispiele: Akku unter 3,5 V; Temperatur über 60 °C; **Laufzeit unter 1 h = Repeater ist neu
+  gestartet** (Absturz, Stromausfall).
+- Regeln, Kanäle, „aktiv bis bestätigt“ und Zabbix-Kennung funktionieren wie bei Sensormetern. Die Abfrage läuft per
+  Funk, also auch ohne WLAN am Gateway.
+- Höchstens 8 Geräte insgesamt (Sensormeter und Repeater zusammen).
+
+**Kanal-API** (ab 0.10.0): Andere Systeme im LAN können die Kanäle und Nachrichten des Gateways lesen, z. B.
+home-central, das Nachrichten eines Kanals an Telegram weiterleitet. Der Zugriff ist nur lesend und braucht kein
+Admin-Passwort.
+- System → **Kanal-API** → „Schlüssel erzeugen“. Den Schlüssel (32 Hex-Zeichen) im anderen System eintragen.
+  „Neu erzeugen“ macht den alten sofort ungültig, „Ausschalten“ sperrt die API. Ohne Schlüssel ist die API aus.
+- Jede Anfrage mit Header `X-API-Key: <Schlüssel>` (oder `Authorization: Bearer <Schlüssel>`):
+
+  | Anfrage | Antwort |
+  |---|---|
+  | `GET /api/v1/channels` | `boot`, `gateway` (Gerätename), `channels`: `idx`, `name`, `kind` (public/hashtag/private), `scope` – ohne Kanalschlüssel |
+  | `GET /api/v1/messages?since=0` | `boot`, `messages`, `next`, `gap` |
+  | `GET /api/v1/messages?since=<next>&channel=<Name>` | nur neue Nachrichten, optional nur aus einem Kanal |
+
+  Eine Nachricht: `seq`, `time` (Unix-Zeit des Absenders), `dir` (`rx` empfangen, `tx` vom Gateway gesendet),
+  `channelIdx`, `channel`, `sender`, `text`, `snr` (dB, bei `tx` `null`), `hops`.
+- **Abonnieren**: alle 10–30 s mit dem `next` der letzten Antwort fragen (höchstens 50 Nachrichten je Antwort; ist
+  `next` gestiegen, gleich nochmal fragen). Ändert sich `boot`, wurde das Gateway neu gestartet → wieder mit
+  `since=0` beginnen. `gap: true` heißt: dazwischen sind Nachrichten verloren gegangen (das Gateway hält die
+  letzten 200 Kanal-Zeilen im RAM).
+- Beispiel: `curl -H "X-API-Key: 0123…" "http://de-by-ort01-gw/api/v1/messages?since=0&channel=haus-alarm"`
+- Die Übertragung ist unverschlüsselt (HTTP), wie die ganze Weboberfläche: nur im eigenen Netz verwenden. Der
+  Schlüssel ist nicht im Backup; nach einer Wiederherstellung neu erzeugen.
 
 **Private Kanäle** aus der App übernehmen: In der App den Kanal teilen bzw. den Schlüssel anzeigen (32 Hex-Zeichen)
 und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.

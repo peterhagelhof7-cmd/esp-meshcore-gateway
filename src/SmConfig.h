@@ -31,7 +31,22 @@ struct Device {
   char pass[32];
   uint16_t intervalS;   // Abfrageintervall
   bool offlineAlert;    // Meldung, wenn nicht erreichbar
+  // E42: entfernter Repeater per Funk statt Sensormeter im LAN. host/port/user
+  // bleiben leer, pass = Gast- oder Admin-Passwort des Repeaters (max. 15).
+  uint8_t type;         // DEV_SENSORMETER / DEV_REPEATER
+  uint8_t key[32];      // öffentlicher Schlüssel des Repeaters
 };
+
+static const uint8_t DEV_SENSORMETER = 0, DEV_REPEATER = 1;
+// Abfrageabstand entfernter Repeater: Funkzeit schonen
+static const uint16_t REPEATER_INTERVAL_MIN_S = 900;
+static const uint16_t REPEATER_INTERVAL_MAX_S = 43200;
+static const uint16_t REPEATER_INTERVAL_DEF_S = 3600;
+// Messwerte entfernter Repeater (Pfade wie bei Sensormetern)
+static const char* const RPT_PATH_BATTERY = "repeater.battery";
+static const char* const RPT_PATH_TEMP = "repeater.temperature";
+static const char* const RPT_PATH_UPTIME = "repeater.uptimeH";
+static const char* const RPT_PATH_NOISE = "repeater.noiseFloor";
 
 struct Rule {
   bool used;

@@ -4,7 +4,9 @@
 #include "ChannelStore.h"
 #include "SmPoller.h"
 #include "ZbxForwarder.h"
+#include "RemoteAdmin.h"
 
+#include <helpers/AdvertDataHelpers.h>
 #include <helpers/TxtDataHelpers.h>
 #include <helpers/BaseChatMesh.h>
 
@@ -189,4 +191,62 @@ bool GatewayMesh::sendChannelText(int channelIdx, const char* text, char* err, s
   snprintf(own, sizeof(own), "%s: %s", getNodeName(), shown);
   zbx_fwd::onChannelText(channelIdx, c.name, own, 0, 0);
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// E42: Fernzugriff auf andere Repeater (RemoteAdmin)
+// ---------------------------------------------------------------------------
+
+void GatewayMesh::onAdvertRecv(mesh::Packet* packet, const mesh::Identity& id, uint32_t timestamp,
+                               const uint8_t* app_data, size_t app_data_len) {
+  MyMesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len);
+  AdvertDataParser parser(app_data, app_data_len);
+  if (parser.isValid()) {
+    remote::onAdvert(id.pub_key, parser.getName(), parser.getType(), packet->getPathHashCount(), packet->getSNR());
+  }
+}
+
+int GatewayMesh::searchPeersByHash(const uint8_t* hash) {
+  _remoteN = remote::matchHash(hash[0], _remoteIdx, MAX_REMOTE_MATCH);
+  _baseN = MyMesh::searchPeersByHash(hash);
+  return _remoteN + _baseN;
+}
+
+void GatewayMesh::getPeerSharedSecret(uint8_t* dest_secret, int peer_idx) {
+  if (peer_idx < _remoteN) remote::secretOf(_remoteIdx[peer_idx], dest_secret);
+  else MyMesh::getPeerSharedSecret(dest_secret, peer_idx - _remoteN);
+}
+
+// Gleicher Knoten als Client in der ACL? Dann gleicher Schlüssel (ECDH).
+int GatewayMesh::baseIndexFor(const uint8_t* secret) {
+  uint8_t s[PUB_KEY_SIZE];
+  for (int b = 0; b < _baseN; b++) {
+    MyMesh::getPeerSharedSecret(s, b);
+    if (!memcmp(s, secret, PUB_KEY_SIZE)) return b;
+  }
+  return -1;
+}
+
+void GatewayMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_idx, const uint8_t* secret,
+                                 uint8_t* data, size_t len) {
+  if (sender_idx >= _remoteN) {
+    MyMesh::onPeerDataRecv(packet, type, sender_idx - _remoteN, secret, data, len);
+    return;
+  }
+  if (remote::onData(_remoteIdx[sender_idx], packet->isRouteFlood(), type, data, len)) return;
+  int b = baseIndexFor(secret);
+  if (b >= 0) MyMesh::onPeerDataRecv(packet, type, b, secret, data, len);
+}
+
+bool GatewayMesh::onPeerPathRecv(mesh::Packet* packet, int sender_idx, const uint8_t* secret, uint8_t* path,
+                                 uint8_t path_len, uint8_t extra_type, uint8_t* extra, uint8_t extra_len) {
+  if (sender_idx >= _remoteN) {
+    return MyMesh::onPeerPathRecv(packet, sender_idx - _remoteN, secret, path, path_len, extra_type, extra, extra_len);
+  }
+  remote::onPath(_remoteIdx[sender_idx], path, path_len, extra_type, extra, extra_len);
+  // Ist derselbe Knoten auch Client dieses Gateways, kennt der Repeater-Code
+  // den neuen Pfad ebenfalls (Antwort steckte schon bei uns, also ohne extra).
+  int b = baseIndexFor(secret);
+  if (b >= 0) MyMesh::onPeerPathRecv(packet, b, secret, path, path_len, 0, nullptr, 0);
+  return true;   // Gegenpfad schicken, damit der Repeater direkt antworten kann
 }

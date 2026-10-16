@@ -13,6 +13,7 @@
 #include "MeshActions.h"
 #include "NetCheck.h"
 #include "NetworkManager.h"
+#include "RemoteAdmin.h"
 #include "RuleEngine.h"
 #include "SmConfig.h"
 #include "SmJson.h"
@@ -34,6 +35,8 @@ struct DevRuntime {
   char error[64] = {0};
   int nValues = 0;
   SmValue values[MAX_VALUES];
+  uint32_t jobId = 0;     // entfernter Repeater: laufende Abfrage (E42)
+  char route[24] = {0};   // entfernter Repeater: "Flood" / "direkt, 2 Hops"
 };
 
 struct RuleRuntime {
@@ -296,12 +299,16 @@ void ruleText(const Rule& r, const Device& d, const RuleRuntime& rt, const char*
 // sonst würde ein anstehender Alarm bei JEDER Konfigurationsänderung (z. B.
 // nur Standardkanal geändert) erneut gesendet (E22).
 bool sameDevice(const Device& a, const Device& b) {
-  return a.used && b.used && !strcmp(a.host, b.host) && a.port == b.port;
+  if (!a.used || !b.used || a.type != b.type) return false;
+  if (a.type == DEV_REPEATER) return !memcmp(a.key, b.key, sizeof(a.key));
+  return !strcmp(a.host, b.host) && a.port == b.port;
 }
 bool sameRule(const Rule& a, const Device& da, const Rule& b, const Device& db) {
   return a.used && b.used && sameDevice(da, db) && !strcmp(a.path, b.path) && a.op == b.op &&
          a.threshold == b.threshold && a.hysteresis == b.hysteresis && a.minDurationS == b.minDurationS;
 }
+
+void evaluateRules(int di, uint32_t now);
 
 // Konfiguration übernehmen; Zustände unveränderter Geräte/Regeln behalten.
 void syncConfig() {
@@ -324,7 +331,9 @@ void syncConfig() {
   memset(pingMap, -1, sizeof(pingMap));
   for (int i = 0; i < MAX_DEVICES; i++) {
     R->dev[i] = DevRuntime();
-    R->pollFlag[i] = true;   // gleich neu abfragen
+    // gleich neu abfragen - entfernte Repeater nicht bei jeder Änderung
+    // (Funkzeit); neue Repeater fragt remoteCycle ohnehin sofort ab
+    R->pollFlag[i] = R->cfg.devices[i].type != DEV_REPEATER;
     for (int j = 0; j < MAX_DEVICES; j++) {
       if (sameDevice(R->cfg.devices[i], oldCfg.devices[j])) { R->dev[i] = oldDev[j]; keptDev++; break; }
     }
@@ -357,6 +366,15 @@ void syncConfig() {
   }
   R->acks.remap(ack::Kind::RULE, ruleMap, MAX_RULES);
   R->acks.remap(ack::Kind::PING, pingMap, MAX_PINGS);
+  // Entfernte Repeater werden nicht bei jeder Änderung neu abgefragt (E42):
+  // neue/geänderte Regeln gleich mit den letzten Werten auswerten, sonst
+  // griffen sie erst bei der nächsten Abfrage (bis zu Stunden später).
+  for (int i = 0; i < MAX_DEVICES; i++) {
+    const DevRuntime& dr = R->dev[i];
+    if (R->cfg.devices[i].used && R->cfg.devices[i].type == DEV_REPEATER && dr.everOk && dr.dev.fails == 0 && dr.nValues > 0) {
+      evaluateRules(i, millis());
+    }
+  }
   R->limiter.setMaxPerHour(R->cfg.settings.maxPerHour);
   char l[96];
   snprintf(l, sizeof(l), "Konfiguration übernommen (%d Geräte, %d Regeln mit Zustand behalten)", keptDev, keptRule);
@@ -420,7 +438,13 @@ void evaluateDevice(int di, bool ok, uint32_t now) {
     emitEvent(R->cfg.settings.defaultChannel, text, &z, 0, true);
   }
   if (!ok) return;
+  evaluateRules(di, now);
+}
 
+// Regeln eines Geräts mit den zuletzt gemessenen Werten auswerten. Aufrufer hält s_lock.
+void evaluateRules(int di, uint32_t now) {
+  const Device& d = deviceOf(R->cfg, di);
+  DevRuntime& dr = runtimeOf(di);
   for (int ri = 0; ri < MAX_RULES; ri++) {
     const Rule& r = R->cfg.rules[ri];
     if (!r.used || !r.enabled || r.device != di) continue;
@@ -559,6 +583,78 @@ void measureInternal(bool evaluate) {
   xSemaphoreGive(s_lock);
 }
 
+// ---------------------------------------------------------------------------
+// Entfernte Repeater (E42): Abfrage per Funk über RemoteAdmin
+// ---------------------------------------------------------------------------
+
+void addValue(DevRuntime& dr, const char* path, float v) {
+  if (dr.nValues >= MAX_VALUES) return;
+  SmValue& x = dr.values[dr.nValues++];
+  strlcpy(x.path, path, sizeof(x.path));
+  x.sensorName[0] = 0;
+  x.value = v;
+}
+
+// Ergebnis einer fertigen Abfrage übernehmen. Aufrufer hält s_lock.
+void remoteResult(int di, const Device& d, DevRuntime& dr, const remote::JobInfo& ji, uint32_t now) {
+  dr.everPolled = true;
+  bool ok = ji.state == remote::State::DONE && ji.poll.hasStatus;
+  if (ok) {
+    const remote::PollData& p = ji.poll;
+    dr.nValues = 0;
+    // Akku aus dem Status (mV); fehlt er dort (0), aus der Telemetrie
+    if (p.battMv) addValue(dr, RPT_PATH_BATTERY, p.battMv / 1000.0f);
+    else if (p.hasVoltage) addValue(dr, RPT_PATH_BATTERY, p.voltage);
+    if (p.hasTemp) addValue(dr, RPT_PATH_TEMP, p.tempC);
+    addValue(dr, RPT_PATH_UPTIME, p.uptimeS / 3600.0f);
+    addValue(dr, RPT_PATH_NOISE, p.noiseFloor);
+    dr.lastOkMs = now;
+    dr.everOk = true;
+    dr.error[0] = 0;
+    if (ji.flood) snprintf(dr.route, sizeof(dr.route), "Flood, %u ms", (unsigned)ji.ms);
+    else snprintf(dr.route, sizeof(dr.route), "direkt %u Hop%s, %u ms", ji.hops, ji.hops == 1 ? "" : "s", (unsigned)ji.ms);
+  } else {
+    strlcpy(dr.error, ji.state == remote::State::DONE ? "Status fehlt" : ji.error, sizeof(dr.error));
+    dr.route[0] = 0;
+    // Fehlversuch: in 10 min erneut statt erst nach dem vollen Abstand, damit
+    // "nicht erreichbar" nach N Fehlversuchen nicht Stunden dauert.
+    uint32_t iv = d.intervalS * 1000UL;
+    if (iv > 600000UL) dr.lastPollMs = now - iv + 600000UL;
+  }
+  evaluateDevice(di, ok, now);
+}
+
+void remoteCycle() {
+  for (int di = 0; di < MAX_DEVICES; di++) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const Device& d = R->cfg.devices[di];
+    DevRuntime& dr = R->dev[di];
+    uint32_t now = millis();
+    if (!d.used || !d.enabled || d.type != DEV_REPEATER) {
+      dr.jobId = 0;
+    } else if (dr.jobId) {
+      remote::JobInfo ji;
+      if (!remote::job(dr.jobId, ji)) {
+        dr.jobId = 0;   // zu alt (sollte nicht vorkommen) -> beim nächsten Mal neu
+      } else if (ji.state == remote::State::DONE || ji.state == remote::State::FAILED) {
+        dr.jobId = 0;
+        remoteResult(di, d, dr, ji, now);
+      }
+    } else if (R->pollFlag[di] || !dr.everPolled || now - dr.lastPollMs >= d.intervalS * 1000UL) {
+      String err;
+      uint32_t id = remote::submitPoll(d.key, d.pass, err);
+      if (id) {
+        dr.jobId = id;
+        dr.lastPollMs = now;
+        R->pollFlag[di] = false;
+      } else {
+        strlcpy(dr.error, err.c_str(), sizeof(dr.error));
+      }
+    }
+    xSemaphoreGive(s_lock);
+  }
+}
+
 void task(void*) {
   static SmValue vals[MAX_VALUES];
   for (;;) {
@@ -573,6 +669,7 @@ void task(void*) {
     xSemaphoreGive(s_lock);
     measureInternal(enabled);
     if (!enabled) continue;
+    remoteCycle();   // entfernte Repeater gehen per Funk, also auch ohne WLAN (E42)
     // Ohne eigenes WLAN gar nicht abfragen: sonst würde jedes Sensormeter als
     // "nicht erreichbar" gezählt und per Funk (geht ja weiter) gemeldet,
     // obwohl das Gateway selbst das Problem ist.
@@ -590,7 +687,7 @@ void task(void*) {
       xSemaphoreTake(s_lock, portMAX_DELAY);
       Device d = R->cfg.devices[di];
       uint32_t now = millis();
-      bool due = d.used && d.enabled &&
+      bool due = d.used && d.enabled && d.type == DEV_SENSORMETER &&
                  (R->pollFlag[di] || !R->dev[di].everPolled || now - R->dev[di].lastPollMs >= d.intervalS * 1000UL);
       uint32_t gen = R->gen;
       xSemaphoreGive(s_lock);
@@ -734,7 +831,10 @@ static void devJson(String& out, int i, const DevRuntime& d, uint32_t now) {
   out += ",\"offline\":" + String(d.dev.offline ? "true" : "false");
   out += ",\"fails\":" + String(d.dev.fails);
   out += ",\"lastOkAgoS\":" + (d.everOk ? String((now - d.lastOkMs) / 1000) : String("null"));
-  out += ",\"error\":\"";
+  out += ",\"busy\":" + String(d.jobId ? "true" : "false");
+  out += ",\"route\":\"";
+  esc(out, d.route);
+  out += "\",\"error\":\"";
   esc(out, d.error);
   out += "\",\"values\":[";
   for (int k = 0; k < d.nValues; k++) {

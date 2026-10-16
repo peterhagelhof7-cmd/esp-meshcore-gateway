@@ -19,6 +19,7 @@
 #include "LogBuffer.h"
 #include "MeshActions.h"
 #include "Profile.h"
+#include "RemoteAdmin.h"
 #include "GatewayStatus.h"
 #include "NetworkManager.h"
 #include "OtaUpdate.h"
@@ -69,6 +70,7 @@ void setup() {
   channel_log.begin();
   alert_log.begin();
   cli_bridge::begin();
+  remote::begin();          // Fernzugriff auf andere Repeater (E42)
   mesh_actions::begin();
   channel_store::begin();
 
@@ -242,6 +244,7 @@ void loop() {
     event_log::add("MESH", "Nachbarsuche nach dem Start gesendet");
   }
   mesh_actions::process();
+  remote::process();
   if (cli_bridge::process()) {
     next_status_update = millis();   // geänderte Einstellungen sofort im Snapshot
   }

@@ -177,6 +177,9 @@ const char* unitFor(const char* path) {
   if (!strcmp(k, "pressureHpa")) return "hPa";
   if (!strcmp(k, "lux")) return "lx";
   if (!strcmp(k, "eco2Ppm")) return "ppm";
+  if (!strcmp(k, "battery")) return "V";        // entfernte Repeater (E42)
+  if (!strcmp(k, "uptimeH")) return "h";
+  if (!strcmp(k, "noiseFloor")) return "dBm";
   return "";
 }
 
@@ -188,6 +191,9 @@ const char* labelFor(const char* path) {
   if (!strcmp(k, "pressureHpa")) return "Luftdruck";
   if (!strcmp(k, "lux")) return "Helligkeit";
   if (!strcmp(k, "eco2Ppm")) return "eCO2";
+  if (!strcmp(k, "battery")) return "Akku";
+  if (!strcmp(k, "uptimeH")) return "Laufzeit";
+  if (!strcmp(k, "noiseFloor")) return "Rauschen";
   return k;
 }
 

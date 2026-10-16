@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ChannelStore.h"
+#include "ChannelLine.h"
 #include "CliBridge.h"
 #include "EventLog.h"
 #include "GatewayConfig.h"
@@ -18,6 +19,8 @@
 #include "NetworkManager.h"
 #include "OtaUpdate.h"
 #include "Profile.h"
+#include "RemoteAdmin.h"
+#include "RemoteFormat.h"
 #include "SmConfig.h"
 #include "SmPoller.h"
 #include "ZbxForwarder.h"
@@ -283,6 +286,209 @@ static void handleCli(AsyncWebServerRequest* req) {
     return;
   }
   req->send(200, "application/json", String("{\"ok\":true,\"id\":") + id + "}");
+}
+
+// ---------------------------------------------------------------------------
+// Kanal-API (E43): Kanäle und Nachrichten für andere Systeme (z. B.
+// home-central -> Telegram), nur lesend, Zugriff per API-Schlüssel statt
+// Admin-Login. Schlüssel erzeugt das Gerät; leer = API aus.
+// ---------------------------------------------------------------------------
+
+static uint32_t s_bootId = 0;   // ändert sich bei jedem Start -> Client setzt seinen Zeiger zurück
+
+static bool apiAuth(AsyncWebServerRequest* req) {
+  String key = gw_config.get().apiKey;
+  if (key.isEmpty()) {
+    req->send(403, "application/json", "{\"error\":\"Kanal-API ist ausgeschaltet (System > Kanal-API)\"}");
+    return false;
+  }
+  String got;
+  if (req->hasHeader("X-API-Key")) {
+    got = req->header("X-API-Key");
+  } else if (req->hasHeader("Authorization")) {
+    String a = req->header("Authorization");
+    if (a.startsWith("Bearer ")) got = a.substring(7);
+  }
+  got.trim();
+  // Vergleich ohne frühen Abbruch (Laufzeit verrät nicht, ab wo es abweicht)
+  uint8_t diff = got.length() == key.length() ? 0 : 1;
+  for (size_t i = 0; i < key.length(); i++) diff |= (uint8_t)(key[i] ^ (i < got.length() ? got[i] : 0));
+  if (diff) {
+    req->send(401, "application/json", "{\"error\":\"API-Schlüssel fehlt oder falsch (Header X-API-Key)\"}");
+    return false;
+  }
+  return true;
+}
+
+static String bootHex() {
+  char b[9];
+  snprintf(b, sizeof(b), "%08x", (unsigned)s_bootId);
+  return String(b);
+}
+
+static void handleApiChannels(AsyncWebServerRequest* req) {
+  if (!apiAuth(req)) return;
+  GwChannel ch[channel_store::MAX_CHANNELS];
+  channel_store::list(ch);
+  String j = "{\"boot\":\"" + bootHex() + "\",\"gateway\":\"" + jsonEscape(gateway_status::get().nodeName) + "\",\"channels\":[";
+  bool first = true;
+  for (int i = 0; i < channel_store::MAX_CHANNELS; i++) {
+    if (!ch[i].used) continue;
+    if (!first) j += ',';
+    first = false;
+    channel_store::Kind k = channel_store::kindOf(ch[i]);
+    j += "{\"idx\":" + String(i) + ",\"name\":\"" + jsonEscape(ch[i].name) + "\",\"kind\":\"" +
+         (k == channel_store::Kind::PUBLIC ? "public" : (k == channel_store::Kind::HASHTAG ? "hashtag" : "private")) +
+         "\",\"scope\":\"" + jsonEscape(ch[i].scope) + "\"}";
+  }
+  j += "]}";
+  req->send(200, "application/json", j);
+}
+
+struct ApiMsgCtx {
+  String* out;
+  bool first;
+  String filter;
+};
+
+static void apiMsgVisitor(const LogBuffer::Line& l, void* p) {
+  ApiMsgCtx* c = (ApiMsgCtx*)p;
+  if (l.type != 'M' && l.type != 'S') return;
+  char buf[LogBuffer::LINE_LEN];
+  strlcpy(buf, l.text, sizeof(buf));
+  chan_line::Parsed m;
+  if (!chan_line::parse(buf, m)) return;
+  if (c->filter.length() && c->filter != m.channel) return;
+  String& j = *c->out;
+  if (!c->first) j += ',';
+  c->first = false;
+  j += "{\"seq\":" + String(l.seq) + ",\"time\":" + String(l.epoch) + ",\"dir\":\"" + (l.type == 'M' ? "rx" : "tx") +
+       "\",\"channelIdx\":" + String(m.idx) + ",\"channel\":\"" + jsonEscape(m.channel) + "\",\"sender\":\"" +
+       jsonEscape(m.sender) + "\",\"text\":\"" + jsonEscape(m.text) + "\",\"snr\":" +
+       (m.hasSnr ? String(m.snr, 2) : String("null")) + ",\"hops\":" + String(m.hops) + "}";
+}
+
+static void handleApiMessages(AsyncWebServerRequest* req) {
+  if (!apiAuth(req)) return;
+  uint32_t since = req->hasParam("since") ? strtoul(req->getParam("since")->value().c_str(), nullptr, 10) : 0;
+  String j;
+  j.reserve(8192);
+  j += "{\"boot\":\"" + bootHex() + "\",\"messages\":[";
+  ApiMsgCtx c{&j, true, req->hasParam("channel") ? req->getParam("channel")->value() : String()};
+  bool gap = false;
+  uint32_t next = channel_log.visit(since, 50, apiMsgVisitor, &c, gap);
+  j += "],\"next\":" + String(next) + ",\"gap\":" + (gap ? "true" : "false") + "}";
+  req->send(200, "application/json", j);
+}
+
+// Verwaltung des Schlüssels (Admin-Login)
+static void handleApiKeyGet(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String key = gw_config.get().apiKey;
+  req->send(200, "application/json", String("{\"enabled\":") + (key.length() ? "true" : "false") + ",\"key\":\"" + key + "\"}");
+}
+
+static void handleApiKeyPost(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String action = formParam(req, "action");
+  GatewaySettings s = gw_config.get();
+  if (action == "new") {
+    uint8_t r[16];
+    esp_fill_random(r, sizeof(r));
+    char hex[33];
+    for (int i = 0; i < 16; i++) snprintf(hex + 2 * i, 3, "%02x", r[i]);
+    s.apiKey = hex;
+    event_log::add("SYS", "Kanal-API: neuer Schlüssel erzeugt (alter ungültig)");
+  } else if (action == "off") {
+    s.apiKey = "";
+    event_log::add("SYS", "Kanal-API ausgeschaltet");
+  } else {
+    req->send(400, "application/json", "{\"error\":\"action = new oder off\"}");
+    return;
+  }
+  gw_config.set(s);
+  req->send(200, "application/json", String("{\"ok\":true,\"enabled\":") + (s.apiKey.length() ? "true" : "false") +
+                                         ",\"key\":\"" + s.apiKey + "\"}");
+}
+
+// ---------------------------------------------------------------------------
+// Fernkonsole (E42): andere Repeater per Funk verwalten
+// ---------------------------------------------------------------------------
+
+static void handleRemoteGet(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  static remote::Known list[remote::MAX_KNOWN];   // nur Web-Task, nicht auf den Stack
+  int n = remote::known(list, remote::MAX_KNOWN);
+  uint32_t now = millis();
+  String j = "{\"known\":[";
+  char hex[65];
+  for (int i = 0; i < n; i++) {
+    const remote::Known& k = list[i];
+    remote_fmt::keyToHex(k.key, hex);
+    if (i) j += ',';
+    j += "{\"key\":\"" + String(hex) + "\",\"name\":\"" + jsonEscape(k.name) + "\",\"type\":\"" +
+         (k.type == 3 ? "room" : "repeater") + "\",\"hops\":" + k.hops + ",\"snr\":" + String(k.snr, 1) +
+         ",\"agoS\":" + (now - k.heardMs) / 1000 + "}";
+  }
+  remote::ConsoleInfo c;
+  remote::consoleInfo(c);
+  j += "],\"console\":";
+  if (!c.active) {
+    j += "null";
+  } else {
+    remote_fmt::keyToHex(c.key, hex);
+    j += "{\"key\":\"" + String(hex) + "\",\"name\":\"" + jsonEscape(c.name) + "\",\"admin\":" + (c.admin ? "true" : "false") +
+         ",\"flood\":" + (c.flood ? "true" : "false") + ",\"hops\":" + c.hops + ",\"idleS\":" + c.idleS +
+         ",\"busy\":" + (c.busy ? "true" : "false") + "}";
+  }
+  j += "}";
+  req->send(200, "application/json", j);
+}
+
+static void handleRemoteLogin(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  uint8_t key[32];
+  String hex = formParam(req, "key");
+  hex.trim();
+  if (!remote_fmt::keyFromHex(hex.c_str(), key)) {
+    req->send(400, "application/json", "{\"error\":\"Öffentlicher Schlüssel: 64 Hex-Zeichen\"}");
+    return;
+  }
+  String err;
+  uint32_t id = remote::submitLogin(key, formParam(req, "pass").c_str(), err);
+  if (!id) { req->send(400, "application/json", "{\"error\":\"" + jsonEscape(err) + "\"}"); return; }
+  req->send(200, "application/json", String("{\"ok\":true,\"id\":") + id + "}");
+}
+
+static void handleRemoteCmd(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String cmd = formParam(req, "cmd");
+  cmd.replace("\r", "");
+  cmd.replace("\n", " ");
+  cmd.trim();
+  String err;
+  uint32_t id = remote::submitCli(cmd.c_str(), err);
+  if (!id) { req->send(400, "application/json", "{\"error\":\"" + jsonEscape(err) + "\"}"); return; }
+  req->send(200, "application/json", String("{\"ok\":true,\"id\":") + id + "}");
+}
+
+static void handleRemoteLogout(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  remote::logout();
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void handleRemoteJob(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  uint32_t id = req->hasParam("id") ? req->getParam("id")->value().toInt() : 0;
+  remote::JobInfo ji;
+  if (!remote::job(id, ji)) { req->send(404, "application/json", "{\"error\":\"Auftrag unbekannt\"}"); return; }
+  static const char* ST[] = {"queued", "running", "done", "failed"};
+  String j = String("{\"state\":\"") + ST[(int)ji.state] + "\",\"ms\":" + ji.ms + ",\"flood\":" + (ji.flood ? "true" : "false") +
+             ",\"hops\":" + ji.hops + ",\"admin\":" + (ji.admin ? "true" : "false") +
+             ",\"hidden\":" + (ji.hidden ? "true" : "false") + ",\"error\":\"" + jsonEscape(ji.error) +
+             "\",\"reply\":\"" + jsonEscape(ji.reply) + "\"}";
+  req->send(200, "application/json", j);
 }
 
 // Mehrere Befehle als ein Job: beliebig viele Formularfelder "cmd" (Reihenfolge
@@ -716,6 +922,7 @@ static void handleReboot(AsyncWebServerRequest* req) {
 }
 
 void web_ui::begin() {
+  s_bootId = esp_random();
   // Alle Routen exakt matchen: ein String-URI matcht sonst auch Unterpfade
   // ("/api/wifi" -> "/api/wifi/scan"), siehe Memory zu ESPAsyncWebServer.
   server.on(AsyncURIMatcher::exact("/"), HTTP_GET, [](AsyncWebServerRequest* req) {
@@ -754,6 +961,15 @@ void web_ui::begin() {
   server.on(AsyncURIMatcher::exact("/api/channels/send"), HTTP_POST, handleChannelSend);
   server.on(AsyncURIMatcher::exact("/api/messages"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, channel_log); });
   server.on(AsyncURIMatcher::exact("/api/console"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, console_log); });
+  server.on(AsyncURIMatcher::exact("/api/v1/channels"), HTTP_GET, handleApiChannels);
+  server.on(AsyncURIMatcher::exact("/api/v1/messages"), HTTP_GET, handleApiMessages);
+  server.on(AsyncURIMatcher::exact("/api/apikey"), HTTP_GET, handleApiKeyGet);
+  server.on(AsyncURIMatcher::exact("/api/apikey"), HTTP_POST, handleApiKeyPost);
+  server.on(AsyncURIMatcher::exact("/api/remote"), HTTP_GET, handleRemoteGet);
+  server.on(AsyncURIMatcher::exact("/api/remote/login"), HTTP_POST, handleRemoteLogin);
+  server.on(AsyncURIMatcher::exact("/api/remote/cmd"), HTTP_POST, handleRemoteCmd);
+  server.on(AsyncURIMatcher::exact("/api/remote/logout"), HTTP_POST, handleRemoteLogout);
+  server.on(AsyncURIMatcher::exact("/api/remote/job"), HTTP_GET, handleRemoteJob);
   server.on(AsyncURIMatcher::exact("/api/packets"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, packet_log); });
   server.onNotFound([](AsyncWebServerRequest* req) {
     req->send(404, "text/plain", "Nicht gefunden");

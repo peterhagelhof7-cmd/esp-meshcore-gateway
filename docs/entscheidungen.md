@@ -798,3 +798,73 @@ an), sondern lokal an den Poller (`sm_poller::onChannelText("Zabbix: @[ich] ACK 
 getMinFreePsram`), API `/api/status` Felder `min_free_heap`, `psram_total`, `psram_free`, `psram_min_free`. Für den
 Dauerlauf: Tiefststände zeigen Lecks/Spitzen, ohne ständig hinzusehen. Schätzung 0.8.0 ca. 277 KB, 0.9.0 ca. 290 KB
 fest belegt (Live-Logs ~199 KB, CLI-Aufträge 56 KB, Ereignis-Log 8 KB, Überwachung ~14 KB, Zabbix ~12 KB, ACK ~2 KB).
+
+## E42 – Fernkonsole und Überwachung entfernter Repeater (2026-10-16, User: „remote Konsole … einen anderen repeater per cli zu verwalten“, „stündlich die abfrage nach akku und temp? bei über oder unterschreiten -> meldung in alarmkanal“, „du kannst das schon bauen“), 0.10.0
+
+- **Weg wie die MeshCore-App**, keine eigene Protokollerweiterung: Anmeldung per `ANON_REQ` mit Passwort, danach
+  `REQ` (Status `0x01`, Telemetrie `0x03`) bzw. `TXT_MSG` mit `TXT_TYPE_CLI_DATA` für CLI-Befehle. Der Ziel-Repeater
+  braucht keine Änderung (jede MeshCore-Repeater-Firmware mit Anmeldung). Formate aus repeater-v1.18.0 übernommen
+  und in `src/RemoteFormat.*` gekapselt (Host-Test).
+- **Ohne Änderung an MeshCore**: `GatewayMesh` überschreibt `searchPeersByHash`, `getPeerSharedSecret`,
+  `onPeerDataRecv`, `onPeerPathRecv`, `onAdvertRecv`. Sitzungs-Ziele stehen bei der Peer-Suche **vor** den eigenen
+  Clients (ACL), höhere Indizes gehen um die Trefferzahl verschoben an `MyMesh`. Ist derselbe Knoten zugleich
+  Client des Gateways (gleicher ECDH-Schlüssel), bekommt `MyMesh` alles, was nicht zu einem laufenden Auftrag
+  passt (z. B. dessen CLI-Befehle an uns) – erkannt über den gleichen Schlüssel (`baseIndexFor`).
+- **Aufträge statt direkter Aufrufe** (`src/RemoteAdmin.*`): Web und Poller legen Aufträge ab, der loopTask
+  arbeitet sie **nacheinander** ab (immer nur einer im Funk, schont Airtime und hält Antworten eindeutig zuordenbar;
+  Status/Telemetrie über den gespiegelten Zeitstempel). Wartezeit wie die App: Flood 16 × Airtime, direkt
+  (6 × Airtime + 250 ms) je Hop, hin und zurück, 6–45 s. Pfad lernt das Gateway aus der ersten (Flood-)Antwort,
+  danach direkt; bleibt eine Antwort aus, wieder Flood.
+- **Fernkonsole** im Konsolen-Tab: Ziel aus empfangenen Adverts (Repeater + Room-Server, 32 im RAM) oder Schlüssel
+  von Hand, Admin-Passwort nur für die Anmeldung (danach steht das Gateway in der ACL des Ziels, das Passwort wird
+  nicht gehalten). Ein Befehl gleichzeitig, kein automatisches Wiederholen (ein Repeater beantwortet einen Befehl
+  mit gleichem Zeitstempel absichtlich leer, und `reboot`/`set` sollen nicht doppelt laufen). Gefährliche Befehle
+  fragen mit Zielnamen nach. Geheimnis-Befehle (`get prv.key` …) wie lokal maskiert, Antwort nur in der Ansicht,
+  nie im Log. 15 min ohne Befehl → beendet. Gast-Anmeldung zeigt, dass CLI Admin braucht (MeshCore beantwortet
+  CLI nur für Admins).
+- **Überwachung** als Gerätetyp „Repeater (per Funk)“ in der bestehenden Überwachung, damit Regeln, Kanäle,
+  Sendelimit, ACK-Pflicht (E39) und Zabbix-Kennung (E41) ohne Sonderweg gelten. Messwerte `repeater.battery` (V,
+  aus Status, sonst Telemetrie), `repeater.temperature` (Telemetrie Kanal 1), `repeater.uptimeH`,
+  `repeater.noiseFloor`. **Gast-Passwort genügt** (Status und Basis-Telemetrie sind für Gäste freigegeben). Abstand
+  900–43200 s, Standard 3600; nach Fehlversuch neuer Versuch nach 10 min, „nicht erreichbar“ nach N Fehlversuchen
+  wie bei Sensormetern. Neustart erkennen = Regel „Laufzeit < 1 h“ (kein eigenes Ereignis nötig).
+- Ablauf je Abfrage (`remote_fmt::PollFlow`): angemeldet → Status → Telemetrie; bleibt der Status aus, einmal neu
+  anmelden (Gäste stehen beim Repeater nur im RAM, nach dessen Neustart ist die Anmeldung weg). Anmeldung ohne
+  Antwort = Passwort falsch oder nicht erreichbar (ein Repeater antwortet auf falsche Passwörter gar nicht).
+  Telemetrie fehlt → Ergebnis ohne Temperatur.
+- Konfigurationsänderungen fragen entfernte Repeater **nicht** neu ab (Funkzeit); neue/geänderte Regeln werden
+  sofort mit den zuletzt gemessenen Werten ausgewertet.
+- Flood ohne Region-Scope (wie die App ohne Standard-Scope). Wo Nachbarn Floods ohne Scope ablehnen, kommt die
+  erste Anfrage nicht an – dann bleibt nur der direkte Weg, sobald ein Pfad bekannt ist.
+
+**Verifikation:** Build V4 + R8 grün, 0 Warnungen in `src/`, Host-Tests grün (neu: Fernabfrage-Format:
+RepeaterStats-Versätze, CayenneLPP mit Fremdkanal/Vorzeichen/Abbruch, Login Admin/Gast, Schlüssel Hex, Wartezeit,
+Ablauf mit Neuanmeldung), UI-Test 239/239 (neu 36: Fernkonsole Gast/Admin/falsches Passwort/Schlüssel von Hand/
+Geheimnis/keine Antwort/Rückfragen mit Ziel; Repeater-Gerät mit Auswahl aus Adverts, Werte, Regel → Alarm, nicht
+erreichbar, feste Messwerte ohne Abfrage, Abstand-Untergrenze, doppelt/ungültig abgelehnt, Bearbeiten).
+**Nicht getestet:** echte Funkstrecke (Mock simuliert den Repeater) – HW-Testplan §13.
+
+## E43 – Kanal-API mit API-Schlüssel (2026-10-16, User: „Api über die eine abfrage aller auf dem Gerät angelegten Kanäle möglich ist, zugriff über einen Api key der auf dem gerät generiert wird … home-central kanäle quasi aboniert und alle nachrichten in einem kanal dann per telegram weiterleiten kann. Das muss noch in die 0.10.0“), 0.10.0
+
+- **Nur lesend**, eigener Zugang statt Admin-Login: home-central braucht weder das Admin-Passwort (das alles darf)
+  noch Schreibrechte. `GET /api/v1/channels` (ohne Kanalschlüssel), `GET /api/v1/messages?since=N[&channel=Name]`.
+  Versioniert unter `/api/v1/`, damit die interne Web-API sich weiter ändern darf.
+- **Schlüssel erzeugt das Gerät** (`esp_fill_random`, 128 Bit, 32 Hex), NVS `gw/api_key`; leer = API aus (Standard).
+  Neu erzeugen macht den alten sofort ungültig, „Ausschalten“ löscht ihn. Übergabe per Header `X-API-Key` oder
+  `Authorization: Bearer`, **nicht** als URL-Parameter (landet sonst in Proxy-/Server-Logs). Vergleich ohne frühen
+  Abbruch. Nicht im Backup (nach Wiederherstellung neu erzeugen und in home-central eintragen).
+- **Abonnieren per Abfrage mit Zeiger** statt Push/Websocket: home-central fragt z. B. alle 10–30 s mit dem `next`
+  der letzten Antwort. Grundlage ist der vorhandene Ringpuffer `channel_log` (200 Zeilen, RAM): empfangene **und**
+  gesendete Nachrichten (`dir` rx/tx), zerlegt in Kanal, Absender, Text, SNR, Hops (`src/ChannelLine.*`, Host-Test).
+  `gap: true` = Zeilen verpasst (zu lange nicht gefragt). `boot` (Zufallswert je Start) ändert sich bei jedem
+  Neustart des Gateways – dann beginnt die Zählung neu, der Client setzt `since` auf 0. Kein eigener Speicher, keine
+  Zustellgarantie über Neustarts (der Puffer liegt nur im RAM).
+- `time` ist der Zeitstempel der Nachricht vom **Absender** (MeshCore), bei gesendeten der eigene.
+- Nur HTTP wie die übrige Weboberfläche: Schlüssel und Inhalte gehen unverschlüsselt durchs LAN. Für ein
+  vertrauenswürdiges Heimnetz akzeptiert, im Handbuch genannt.
+
+**Verifikation:** Build V4 + R8 grün, Host-Test Kanal-API (Logzeile zerlegen: Absender bis zum ersten „: “, gesendet
+ohne SNR, ohne Absender, ungültige Zeilen), UI-Test 254/254 (neu 15: aus → 403, erzeugen/anzeigen/verbergen, ohne/
+falscher Schlüssel → 401, Kanäle ohne Geheimnisse, Bearer, Nachrichten rx/tx, Zeiger ohne Doppelte, Kanalfilter,
+neu erzeugt → alter ungültig, Schlüssel nicht im Ereignis-Log, ausgeschaltet → 403). **Nicht getestet:** auf echter
+Hardware, Gegenstelle home-central (noch nicht gebaut).

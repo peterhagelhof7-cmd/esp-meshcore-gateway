@@ -37,6 +37,10 @@ public:
   // vorhandenen Zeile schon überschrieben wurden.
   uint32_t appendJson(uint32_t since, size_t maxLines, String& out, bool& gap);
 
+  // Wie appendJson, ruft aber v für jede Zeile auf (unter dem Lock: kurz halten).
+  typedef void (*Visitor)(const Line& l, void* ctx);
+  uint32_t visit(uint32_t since, size_t maxLines, Visitor v, void* ctx, bool& gap);
+
   // Kopie der neuesten Zeile, false = noch keine (OLED-Seite "Nachricht").
   bool latest(Line& out);
 

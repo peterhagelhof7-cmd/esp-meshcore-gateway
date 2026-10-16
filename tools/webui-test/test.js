@@ -74,6 +74,76 @@ async function runCli(page, cmd) {
   check('Konsole: erase nach Ablehnung nicht gesendet', !(await page.$eval('#conOut', e => e.innerText)).includes('> erase'));
   await page.screenshot({ path: out + '/02_console.png' });
 
+  // ---------- Fernkonsole (E42) ----------
+  {
+    const until = async (fn, ms = 8000) => { const s = Date.now(); while (Date.now() - s < ms) { if (await fn()) return true; await sleep(200); } return false; };
+    const conTxt = () => page.$eval('#conOut', e => e.innerText);
+    const send = async c => { await page.$eval('#cliIn', e => e.value = ''); await page.type('#cliIn', c); await page.keyboard.press('Enter'); };
+    check('Fernkonsole: Link auf offizielle CLI-Doku', (await page.$eval('#v_console a[href="https://docs.meshcore.io/cli_commands/"]', e => e.target)) === '_blank');
+    const opts = await page.$$eval('#rmTarget option', o => o.map(x => x.textContent));
+    check('Fernkonsole: Ziele aus Adverts', opts[0] === 'Dieses Gateway' && opts.some(t => t.startsWith('Solar-Hof · A1B2C3D4 · 2 Hops')) &&
+          opts.some(t => t.includes('Vereinsheim') && t.includes('Room-Server')) && opts[opts.length - 1] === 'Schlüssel eingeben …', JSON.stringify(opts));
+    check('Fernkonsole: lokal keine Passwortzeile', await page.$eval('#rmPass', e => e.hidden));
+    const solar = 'a1b2c3d4' + '11'.repeat(28);
+    await page.select('#rmTarget', solar);
+    check('Fernkonsole: Ziel gewählt -> Passwort + Anmelden', !(await page.$eval('#rmPass', e => e.hidden)) && !(await page.$eval('#rmLogin', e => e.hidden)));
+    // Gast-Anmeldung: CLI nicht erlaubt
+    await page.type('#rmPass', 'gast');
+    await page.click('#rmLogin');
+    check('Fernkonsole: als Gast angemeldet', await until(async () => (await page.$eval('#rmState', e => e.textContent)).includes('als Gast angemeldet')),
+          await page.$eval('#rmState', e => e.textContent));
+    check('Fernkonsole: Passwortfeld geleert', (await page.$eval('#rmPass', e => e.value)) === '');
+    await send('ver');
+    check('Fernkonsole: Gast -> CLI abgelehnt', await until(async () => (await conTxt()).includes('CLI braucht das Admin-Passwort')));
+    await page.click('#rmLogout');
+    check('Fernkonsole: abgemeldet -> Dieses Gateway', await until(async () => (await page.$eval('#rmTarget', e => e.value)) === '' &&
+          (await conTxt()).includes('[Solar-Hof] Fernkonsole beendet')));
+    // Falsches Passwort
+    await page.select('#rmTarget', 'c1d2e3f4' + '22'.repeat(28));
+    await page.type('#rmPass', 'falsch');
+    await page.click('#rmLogin');
+    check('Fernkonsole: falsches Passwort -> keine Antwort', await until(async () => (await conTxt()).includes('[Kirchturm] keine Antwort (Passwort falsch')), (await conTxt()).slice(-200));
+    check('Fernkonsole: danach nicht angemeldet', !(await page.$eval('#rmLogin', e => e.hidden)) && await page.$eval('#rmLogout', e => e.hidden));
+    // Schlüssel von Hand: ungültig
+    await page.select('#rmTarget', 'manual');
+    check('Fernkonsole: Schlüsselfeld sichtbar', !(await page.$eval('#rmKey', e => e.hidden)));
+    await page.type('#rmKey', 'b0a2');
+    await page.click('#rmLogin');
+    check('Fernkonsole: kurzer Schlüssel abgelehnt', await until(async () => (await conTxt()).includes('64 Hex-Zeichen')));
+    // Schlüssel von Hand: Solar-Hof als Admin
+    await page.$eval('#rmKey', e => e.value = '');
+    await page.type('#rmKey', solar.toUpperCase());
+    await page.type('#rmPass', 'adminpw');
+    await page.click('#rmLogin');
+    check('Fernkonsole: Admin per Schlüssel', await until(async () => (await page.$eval('#rmState', e => e.textContent)).includes('Solar-Hof (A1B2C3D4), als Admin angemeldet')),
+          await page.$eval('#rmState', e => e.textContent));
+    check('Fernkonsole: Platzhalter nennt Ziel', (await page.$eval('#cliIn', e => e.placeholder)).startsWith('Befehl an Solar-Hof'));
+    await send('ver');
+    check('Fernkonsole: Befehl + Antwort per Funk', await until(async () => { const c = await conTxt(); return c.includes('> [Solar-Hof] ver') && c.includes('[Solar-Hof] v1.18.0 (Build'); }), (await conTxt()).slice(-200));
+    await send('get prv.key');
+    check('Fernkonsole: Geheimnis nur in der Ansicht', await until(async () => (await conTxt()).includes('[Solar-Hof] > 9f9f')) &&
+          (await page.evaluate(async () => (await (await fetch('/api/console?since=0')).json()).lines.every(l => !l.x.includes('9f9f9f9f')))));
+    await send('stumm');
+    check('Fernkonsole: keine Antwort -> Hinweis', await until(async () => (await conTxt()).includes('[Solar-Hof] keine Antwort (nochmal senden)')));
+    await until(async () => !(await page.evaluate(() => rm.busy)));
+    let dlg = '';
+    const onDlg = d => { dlg = d.message(); };
+    page.on('dialog', onDlg);
+    await send('reboot');
+    check('Fernkonsole: reboot fragt mit Ziel nach', await until(async () => dlg.startsWith('Ziel: Solar-Hof') && dlg.includes('Der Repeater startet neu')), dlg);
+    await until(async () => (await conTxt()).includes('> [Solar-Hof] reboot'));
+    await until(async () => !(await page.evaluate(() => rm.busy)));
+    await send('erase');
+    await sleep(1200);
+    page.off('dialog', onDlg);
+    check('Fernkonsole: erase abgelehnt, nicht gesendet', dlg.includes('Löscht ALLE') && !(await conTxt()).includes('> [Solar-Hof] erase'), dlg.split('\n')[0]);
+    await page.screenshot({ path: out + '/02b_remote_console.png' });
+    await page.click('#rmLogout');
+    await until(async () => (await page.$eval('#rmTarget', e => e.value)) === '');
+    await send('ver');
+    check('Fernkonsole: danach wieder lokal', await until(async () => (await conTxt()).includes('v1.17.1 (Build')) && !(await page.evaluate(() => !!rm.con)));
+  }
+
   await page.click('nav a[data-v=packets]');
   await sleep(2500);
   let n = await page.$$eval('#pktOut > div', d => d.length);
@@ -468,6 +538,73 @@ async function runCli(page, cmd) {
     await page.click('#pgSave');
     await until(async () => !((await rows('#pgBody'))[0]?.[2] || '').endsWith('bis ACK'));
     await page.screenshot({ path: out + '/11_ping.png', fullPage: true });
+
+    // ---------- Entfernte Repeater überwachen (E42) ----------
+    const nDev0 = (await page.evaluate(async () => (await (await fetch('/api/sm')).json()).config)).devices.length;
+    const nRule0 = (await page.evaluate(async () => (await (await fetch('/api/sm')).json()).config)).rules.length;
+    await page.select('#sdType', 'repeater');
+    check('Repeater: Typ blendet LAN-Felder aus', await page.$eval('#sdHost', e => e.closest('.fld').hidden) && !(await page.$eval('#sdKey', e => e.closest('.fld').hidden)));
+    check('Repeater: Abfrageabstand 3600, min 900', (await page.$eval('#sdInt', e => e.value + '/' + e.min + '/' + e.max)) === '3600/900/43200');
+    check('Repeater: Auswahl aus Adverts', await until(async () => (await page.$$eval('#sdRpt option', o => o.map(x => x.textContent))).some(x => x.startsWith('Solar-Hof · A1B2C3D4'))));
+    await page.select('#sdRpt', 'a1b2c3d4' + '11'.repeat(28));
+    check('Repeater: Auswahl füllt Schlüssel + Name', (await page.$eval('#sdKey', e => e.value)) === 'a1b2c3d4' + '11'.repeat(28) && (await page.$eval('#sdName', e => e.value)) === 'Solar-Hof');
+    await setVal('#sdRPass', 'gast');
+    await page.click('#sdSave');
+    const solarRow = async () => (await rows('#smDevBody')).find(r => r[0] === 'Solar-Hof') || [];
+    check('Repeater: online mit Akku, Temperatur, Laufzeit, Rauschen', await until(async () => {
+      const r = await solarRow(); return (r[1] || '') === 'Funk · A1B2C3D4' && (r[2] || '').startsWith('✓') && (r[2] || '').includes('(direkt 2 Hops, 1200 ms)') &&
+        /Akku 3\.7V · Temperatur 31\.5°C · Laufzeit 26\.1h · Rauschen -115dBm/.test(r[3] || ''); }, 10000), JSON.stringify(await solarRow()));
+    const cfgR = await page.evaluate(async () => (await (await fetch('/api/sm')).json()).config);
+    const dR = cfgR.devices[cfgR.devices.length - 1];
+    check('Repeater: gespeichert als Typ repeater, Passwort maskiert, ohne Host', dR.type === 'repeater' && dR.pass === '***' && dR.host === undefined && dR.intervalS === 3600, JSON.stringify(dR));
+    // Regel: Akku < 3,8 V -> ALARM
+    const ri = String(cfgR.devices.length - 1);
+    await page.select('#srDev', ri);
+    check('Repeater: Messwerte für Regel', await until(async () => (await page.$$eval('#srPath option', o => o.map(x => x.value))).includes('repeater.battery')));
+    await page.select('#srPath', 'repeater.battery');
+    await page.select('#srOp', '1');
+    await setVal('#srThr', '3.8');
+    await setVal('#srHyst', '0.1');
+    await page.click('#srSave');
+    check('Repeater: Akku-Regel -> Meldung', await until(async () => /ALARM Solar-Hof: Akku 3\.7V \(<3\.8V\)/.test(await t('#smLog')), 10000), (await t('#smLog')).slice(-200));
+    // Nicht erreichbarer Repeater: Regel-Messwerte trotzdem wählbar
+    await page.select('#sdType', 'repeater');
+    await setVal('#sdName', 'Funkloch');
+    await setVal('#sdKey', 'd4c3b2a1' + '33'.repeat(28));
+    await setVal('#sdInt', '100');
+    await page.click('#sdSave');
+    check('Repeater: unerreichbar -> Fehler', await until(async () => { const r = (await rows('#smDevBody')).find(x => x[0] === 'Funkloch') || []; return (r[2] || '').startsWith('✗ keine Antwort auf Anmeldung'); }, 10000),
+          JSON.stringify((await rows('#smDevBody')).find(x => x[0] === 'Funkloch')));
+    const cfgF = await page.evaluate(async () => (await (await fetch('/api/sm')).json()).config);
+    check('Repeater: Abstand auf min. 900 s angehoben', cfgF.devices[cfgF.devices.length - 1].intervalS === 900);
+    await page.select('#srDev', String(cfgF.devices.length - 1));
+    check('Repeater: feste Messwerte auch ohne Abfrage', await until(async () => JSON.stringify(await page.$$eval('#srPath option', o => o.map(x => x.value))) ===
+          JSON.stringify(['repeater.battery', 'repeater.temperature', 'repeater.uptimeH', 'repeater.noiseFloor'])), JSON.stringify(await page.$$eval('#srPath option', o => o.map(x => x.value))));
+    // Fehleingaben
+    await page.select('#sdType', 'repeater');
+    await setVal('#sdName', 'Doppelt');
+    await setVal('#sdKey', 'a1b2c3d4' + '11'.repeat(28));
+    await page.click('#sdSave');
+    check('Repeater: derselbe Repeater zweimal abgelehnt', await until(async () => (await t('#sdMsg')).includes('zweimal')), await t('#sdMsg'));
+    await setVal('#sdKey', 'xyz');
+    await page.click('#sdSave');
+    check('Repeater: Schlüssel ungültig abgelehnt', await until(async () => (await t('#sdMsg')).includes('64 Hex-Zeichen')), await t('#sdMsg'));
+    // Bearbeiten lädt Repeater-Felder
+    await page.click('#sdCancel').catch(() => {});
+    await page.$$eval('#smDevBody tr', r => r.find(x => x.children[0].textContent === 'Solar-Hof').querySelectorAll('button')[1].click());
+    check('Repeater: Bearbeiten lädt Typ, Schlüssel, Passwort ***', (await page.$eval('#sdType', e => e.value)) === 'repeater' &&
+          (await page.$eval('#sdKey', e => e.value)) === 'a1b2c3d4' + '11'.repeat(28) && (await page.$eval('#sdRPass', e => e.value)) === '***' &&
+          !(await page.$eval('#sdRPass', e => e.closest('.fld').hidden)));
+    await page.click('#sdCancel');
+    check('Repeater: Abbrechen -> zurück auf Sensormeter', (await page.$eval('#sdType', e => e.value)) === 'sensormeter' && !(await page.$eval('#sdHost', e => e.closest('.fld').hidden)));
+    await page.screenshot({ path: out + '/11b_repeater.png', fullPage: true });
+    // Aufräumen: beide Repeater (mit Regel) löschen
+    for (const nm of ['Funkloch', 'Solar-Hof']) {
+      await page.$$eval('#smDevBody tr', (r, nm) => r.find(x => x.children[0].textContent === nm).querySelectorAll('button')[2].click(), nm);
+      await until(async () => !(await rows('#smDevBody')).some(x => x[0] === nm));
+    }
+    const cfgE = await page.evaluate(async () => (await (await fetch('/api/sm')).json()).config);
+    check('Repeater: aufgeräumt', cfgE.devices.length === nDev0 && cfgE.rules.length === nRule0, cfgE.devices.length + '/' + cfgE.rules.length);
   }
 
   // ---------- Einstellungen ----------
@@ -714,6 +851,41 @@ async function runCli(page, cmd) {
     await page.$eval('#wifiForm', f => f.requestSubmit());
     check('IP: Haken weg -> wieder DHCP', await until(async () => { const c = (await st()).cfg; return c.ip === '' && c.pending === false; }), JSON.stringify((await st()).cfg));
     await page.screenshot({ path: out + '/12_ip.png', fullPage: true });
+
+    // ---------- Kanal-API (E43) ----------
+    const api = (path, hdr) => page.evaluate(async (p, h) => { const r = await fetch(p, { headers: h || {} }); return { code: r.status, j: await r.json() }; }, path, hdr);
+    check('API: anfangs aus', await until(async () => (await t('#ak_state')).startsWith('aus')) && await page.$eval('#akOff', e => e.hidden));
+    check('API: aus -> 403', (await api('/api/v1/channels', { 'X-API-Key': 'x' })).code === 403);
+    await page.click('#akNew');
+    check('API: Schlüssel erzeugt und sichtbar', await until(async () => (await t('#ak_state')) === 'eingeschaltet' && /^[0-9a-f]{32}$/.test(await t('#ak_key'))), await t('#ak_key'));
+    const key1 = await t('#ak_key');
+    await page.click('#akShow');
+    check('API: Verbergen maskiert', /^[0-9a-f]{4}•+[0-9a-f]{4}$/.test(await t('#ak_key')), await t('#ak_key'));
+    await page.click('#akShow');
+    check('API: ohne Schlüssel -> 401', (await api('/api/v1/channels')).code === 401);
+    check('API: falscher Schlüssel -> 401', (await api('/api/v1/channels', { 'X-API-Key': key1.replace(/.$/, c => c === '0' ? '1' : '0') })).code === 401);
+    const ch = await api('/api/v1/channels', { 'X-API-Key': key1 });
+    check('API: Kanäle mit Schlüssel', ch.code === 200 && ch.j.channels.some(c => c.name === '#test' && c.kind === 'hashtag') && /^[0-9a-f]{8}$/.test(ch.j.boot) &&
+          ch.j.channels.every(c => !('secret' in c) && !('key' in c)), JSON.stringify(ch.j).slice(0, 200));
+    check('API: Bearer geht auch', (await api('/api/v1/channels', { Authorization: 'Bearer ' + key1 })).code === 200);
+    const m1 = await api('/api/v1/messages?since=0', { 'X-API-Key': key1 });
+    check('API: Nachrichten mit Absender/Text/Richtung', m1.code === 200 && m1.j.messages.some(m => m.dir === 'rx' && m.sender && m.text && m.channel && typeof m.hops === 'number') &&
+          m1.j.messages.some(m => m.dir === 'tx'), JSON.stringify(m1.j.messages.slice(-2)));
+    check('API: Seq aufsteigend, next dahinter', m1.j.messages.every((m, i, a) => !i || m.seq > a[i - 1].seq) && m1.j.next > m1.j.messages[m1.j.messages.length - 1].seq);
+    let cur = m1.j.next, all = m1.j.messages.length;
+    for (let k = 0; k < 20; k++) { const r = await api('/api/v1/messages?since=' + cur, { 'X-API-Key': key1 }); if (r.j.next === cur) break; all += r.j.messages.length; cur = r.j.next; }
+    const m2 = await api('/api/v1/messages?since=' + cur, { 'X-API-Key': key1 });
+    check('API: mit next keine alten Nachrichten doppelt', m2.j.messages.every(m => m.seq >= cur), cur + ' ' + JSON.stringify(m2.j.messages.map(m => m.seq)));
+    const mf = await api('/api/v1/messages?since=0&channel=' + encodeURIComponent('#test'), { 'X-API-Key': key1 });
+    check('API: Filter nach Kanal', mf.j.messages.length > 0 && mf.j.messages.every(m => m.channel === '#test'), mf.j.messages.length + '');
+    await page.click('#akNew');   // Rückfrage wird angenommen
+    check('API: neu erzeugt -> alter Schlüssel ungültig', await until(async () => (await t('#ak_key')) !== key1 && /^[0-9a-f]{32}$/.test(await t('#ak_key'))) &&
+          (await api('/api/v1/channels', { 'X-API-Key': key1 })).code === 401 && (await api('/api/v1/channels', { 'X-API-Key': await t('#ak_key') })).code === 200);
+    const lgk = await page.evaluate(async () => (await fetch('/api/log/download')).text());
+    check('API: Schlüssel nicht im Ereignis-Log', !lgk.includes(key1) && lgk.includes('Kanal-API: neuer Schlüssel erzeugt'));
+    await page.screenshot({ path: out + '/12b_api.png' });
+    await page.click('#akOff');
+    check('API: ausgeschaltet -> 403', await until(async () => (await t('#ak_state')).startsWith('aus')) && (await api('/api/v1/messages', { 'X-API-Key': key1 })).code === 403);
     await page.reload({ waitUntil: 'networkidle0' });
 
     await page.click('nav a[data-v=wifi]');

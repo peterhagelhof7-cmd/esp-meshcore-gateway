@@ -308,10 +308,12 @@ def ver_tuple(v):
 
 import urllib.request
 
-UNITS = {'temperature': '°C', 'humidity': '%', 'pressureHpa': 'hPa', 'lux': 'lx', 'eco2Ppm': 'ppm', 'chipTemp': '°C'}
+UNITS = {'temperature': '°C', 'humidity': '%', 'pressureHpa': 'hPa', 'lux': 'lx', 'eco2Ppm': 'ppm', 'chipTemp': '°C',
+         'battery': 'V', 'uptimeH': 'h', 'noiseFloor': 'dBm'}
 INTERNAL = 100        # Pseudo-Gerät "Gateway (intern)", wie sm::INTERNAL_DEVICE
 CHIP_TEMP = 52.3
-LABELS = {'temperature': 'Temperatur', 'humidity': 'Feuchte', 'pressureHpa': 'Luftdruck', 'lux': 'Helligkeit', 'eco2Ppm': 'eCO2', 'chipTemp': 'Chiptemperatur'}
+LABELS = {'temperature': 'Temperatur', 'humidity': 'Feuchte', 'pressureHpa': 'Luftdruck', 'lux': 'Helligkeit', 'eco2Ppm': 'eCO2', 'chipTemp': 'Chiptemperatur',
+          'battery': 'Akku', 'uptimeH': 'Laufzeit', 'noiseFloor': 'Rauschen'}
 
 
 class FakeSm:
@@ -411,10 +413,20 @@ class FakeSm:
         if len(devs) > 8: return 'Maximal 8 Geräte'
         for i, d in enumerate(devs):
             if not d.get('name'): return 'Gerät %d: Name fehlt' % (i + 1)
-            if not re.fullmatch(r'[A-Za-z0-9._-]+', d.get('host', '')): return 'Gerät %s: Adresse ungültig' % d['name']
+            if d.get('type') == 'repeater':   # E42, wie SmConfig::parse
+                if not re.fullmatch(r'[0-9a-fA-F]{64}', d.get('key', '')): return 'Gerät %s: öffentlicher Schlüssel (64 Hex-Zeichen) fehlt oder ungültig' % d['name']
+                d['key'] = d['key'].lower()
+                d['intervalS'] = min(43200, max(900, int(d.get('intervalS', 3600))))
+                for k in ('host', 'port', 'user'): d.pop(k, None)
+            else:
+                d['type'] = 'sensormeter'
+                if not re.fullmatch(r'[A-Za-z0-9._-]+', d.get('host', '')): return 'Gerät %s: Adresse ungültig' % d['name']
             oi = d.pop('origIdx', -1)
             if d.get('pass') == '***' and 0 <= oi < len(self.cfg['devices']):
                 d['pass'] = self.cfg['devices'][oi]['pass']
+            if d['type'] == 'repeater' and len(d.get('pass', '')) > 15: return 'Gerät %s: Passwort max. 15 Zeichen' % d['name']
+        keys = [d['key'] for d in devs if d['type'] == 'repeater']
+        if len(keys) != len(set(keys)): return 'Derselbe Repeater ist zweimal eingetragen'
         rules = j.get('rules', [])
         if len(rules) > 16: return 'Maximal 16 Regeln'
         for i, r in enumerate(rules):
@@ -432,7 +444,7 @@ class FakeSm:
         old_p = {p['host']: s for p, s in zip(self.cfg.get('pings', []), self.ping_state)}
         self.ping_state = [old_p.get(p['host'], {}) for p in pings]
         # Wie SmPoller::syncConfig: Zustand unveränderter Geräte/Regeln behalten
-        dkey = lambda d: (d['host'], d.get('port', 80))
+        dkey = lambda d: ('rpt', d['key']) if d.get('type') == 'repeater' else (d['host'], d.get('port', 80))
         rkey = lambda r, ds: (('intern', 0) if r['device'] == INTERNAL else dkey(ds[r['device']]), r['path'], r['op'], r['threshold'], r.get('hysteresis', 0), r.get('minDurationS', 0))
         old_d = {dkey(d): s for d, s in zip(self.cfg['devices'], self.dev_state)}
         old_r = {rkey(r, self.cfg['devices']): s for r, s in zip(self.cfg['rules'], self.rule_state)}
@@ -441,7 +453,10 @@ class FakeSm:
         kd = sum(1 for d in devs if dkey(d) in old_d); kr = sum(1 for r in rules if rkey(r, devs) in old_r)
         self.cfg = j
         push('smlog', 'S', 'Konfiguration übernommen (%d Geräte, %d Regeln mit Zustand behalten)' % (kd, kr))
-        for i in range(len(devs)): self.poll(i)
+        # neue Geräte abfragen; entfernte Repeater nicht bei jeder Änderung (Funkzeit)
+        for i, d in enumerate(devs):
+            if d['type'] != 'repeater' or not self.dev_state[i].get('polled'): self.poll(i)
+            elif self.dev_state[i].get('online'): self.evaluate(i, d['name'], self.dev_state[i].get('values', []))   # wie syncConfig
         return None
 
     def fetch(self, d):
@@ -483,6 +498,19 @@ class FakeSm:
     def poll(self, i):
         d = self.cfg['devices'][i]
         st = self.dev_state[i]
+        if d.get('type') == 'repeater':   # per Funk über FakeRemote (E42)
+            if st.get('busy'): return
+            st['busy'] = True
+            def done(ok, res, route, d=d, st=st):
+                if self.cfg['devices'][i:i + 1] != [d]: return   # Konfig inzwischen geändert
+                st.update(busy=False, polled=True, route=route)
+                if not ok:
+                    st.update(online=False, fails=st.get('fails', 0) + 1, error=res); return
+                vals = [{'path': p, 'sensor': '', 'label': LABELS[p.split('.')[1]], 'unit': UNITS[p.split('.')[1]], 'value': v} for p, v in res]
+                st.update(online=True, offline=False, fails=0, lastOk=time.time(), error='', values=vals)
+                self.evaluate(i, d['name'], vals)
+            rmt.poll(d['key'], d.get('pass', ''), done)
+            return
         st['polled'] = True
         try:
             data = self.fetch(d)
@@ -546,6 +574,7 @@ class FakeSm:
         for i, s in enumerate(self.dev_state):
             devs.append({'idx': i, 'polled': s.get('polled', False), 'online': s.get('online', False), 'offline': s.get('offline', False),
                          'fails': s.get('fails', 0), 'lastOkAgoS': int(time.time() - s['lastOk']) if s.get('lastOk') else None,
+                         'busy': s.get('busy', False), 'route': s.get('route', ''),
                          'error': s.get('error', ''), 'values': s.get('values', [])})
         now = time.time()
         pst = []
@@ -676,10 +705,109 @@ for i in range(5):
 
 
 # hostname '' = automatisch, folgt dem Gerätenamen (E32)
+BOOT_ID = os.urandom(4).hex()
 gwcfg = {'ssid': 'TestNetz', 'pass': 'geheim123', 'hostname': '', 'reboots': 0,
          'ip': '', 'mask': '', 'gw': '', 'dns1': '', 'dns2': '', 'pending': False}
 IP_RE = re.compile(r'^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$')
 ipcheck = {'state': 'idle', 'detail': ''}
+
+
+class FakeRemote:
+    """Fernzugriff auf andere Repeater (E42) wie src/RemoteAdmin.cpp, Funk simuliert:
+    Antwort nach ~1 s; Repeater 'Funkloch' antwortet nie; Befehl 'stumm' bleibt ohne Antwort."""
+    REP = [  # key, name, typ, hops, admin-pw, gast-pw, akku mV, temp, laufzeit s
+        ('a1b2c3d4' + '11' * 28, 'Solar-Hof', 'repeater', 2, 'adminpw', 'gast', 3712, 31.5, 93784),
+        ('c1d2e3f4' + '22' * 28, 'Kirchturm', 'repeater', 0, 'turm', '', 4105, 18.0, 1800),
+        ('d4c3b2a1' + '33' * 28, 'Funkloch', 'repeater', 5, 'x', 'x', 0, 0, 0),
+        ('e5e5e5e5' + '44' * 28, 'Vereinsheim', 'room', 1, 'raum', 'raum', 0, 0, 0)]
+
+    def __init__(self):
+        self.jobs = {}; self.next = 1; self.con = None; self.sess = {}; self.delay = 1.0
+
+    def rep(self, key):
+        return next((r for r in self.REP if r[0] == key), None)
+
+    def name(self, key):
+        r = self.rep(key)
+        return r[1] if r else key[:8].upper()
+
+    def known(self):
+        return [{'key': r[0], 'name': r[1], 'type': r[2], 'hops': r[3], 'snr': 6.5, 'agoS': 40 + 30 * i} for i, r in enumerate(self.REP)]
+
+    def new_job(self, kind):
+        jid = self.next; self.next += 1
+        self.jobs[jid] = {'state': 'running', 'kind': kind, 'ms': 0, 'flood': True, 'hops': 0, 'admin': False,
+                          'hidden': False, 'error': '', 'reply': '', 't': time.time(), 'poll': None}
+        return jid
+
+    def finish(self, jid, **kw):
+        j = self.jobs[jid]; j.update(kw); j['ms'] = int((time.time() - j['t']) * 1000)
+        if j['state'] == 'running': j['state'] = 'done'
+
+    def login(self, key, pw):
+        if len(pw) > 15: return 0, 'Passwort max. 15 Zeichen (Grenze von MeshCore)'
+        jid = self.new_job('login')
+        push('console', 's', '[%s] Anmeldung …' % self.name(key))
+        def run():
+            time.sleep(self.delay)
+            with lock:
+                r = self.rep(key)
+                if not r or r[1] == 'Funkloch' or pw not in (r[4], r[5]):
+                    self.finish(jid, state='failed', error='keine Antwort (Passwort falsch oder Repeater nicht erreichbar)')
+                    push('console', 's', '[%s] %s' % (self.name(key), self.jobs[jid]['error'])); return
+                admin = pw == r[4]
+                self.sess[key] = {'admin': admin, 'hops': r[3]}
+                self.con = key
+                self.finish(jid, admin=admin)
+                push('console', 's', '[%s] angemeldet als %s (Flood, %d ms)%s' % (r[1], 'Admin' if admin else 'Gast',
+                     self.jobs[jid]['ms'], '' if admin else ' - CLI braucht das Admin-Passwort'))
+        threading.Thread(target=run, daemon=True).start()
+        return jid, ''
+
+    def cmd(self, c):
+        if not self.con: return 0, 'nicht angemeldet'
+        if not self.sess[self.con]['admin']: return 0, 'nur als Gast angemeldet - CLI braucht das Admin-Passwort'
+        if any(j['kind'] == 'cli' and j['state'] == 'running' for j in self.jobs.values()): return 0, 'vorheriger Befehl läuft noch'
+        if not c: return 0, 'leerer Befehl'
+        key = self.con; name = self.name(key)
+        jid = self.new_job('cli')
+        hidden = c.startswith(EV_SECRET)
+        self.jobs[jid]['hidden'] = hidden
+        push('console', 'c', '[%s] %s' % (name, 'password ********' if c.startswith('password ') else c))
+        def run():
+            time.sleep(self.delay)
+            with lock:
+                if c == 'stumm':
+                    self.finish(jid, state='failed', error='keine Antwort (nochmal senden)')
+                    push('console', 's', '[%s] keine Antwort (nochmal senden)' % name); return
+                rep = {'ver': 'v1.18.0 (Build: 15-Oct-2026)', 'get name': '> ' + name, 'clock': '12:00 - 16/10/2026 UTC',
+                       'get prv.key': '> ' + '9f' * 32}.get(c, 'OK' if c.startswith('set ') else 'Unknown command')
+                self.finish(jid, reply=rep, flood=False, hops=self.sess[key]['hops'])
+                push('console', 's' if hidden else 'r', '[%s] %s' % (name, '(Antwort enthält ein Geheimnis, nur in der Konsole angezeigt)' if hidden else rep))
+        threading.Thread(target=run, daemon=True).start()
+        return jid, ''
+
+    def poll(self, key, pw, done):
+        """Überwachung: done(ok, values|fehler, route) nach der simulierten Funkzeit"""
+        def run():
+            time.sleep(self.delay)
+            with lock:
+                r = self.rep(key)
+                if not r or r[1] == 'Funkloch' or pw not in (r[4], r[5]):
+                    done(False, 'keine Antwort auf Anmeldung (Passwort falsch oder nicht erreichbar)', ''); return
+                vals = [('repeater.battery', r[6] / 1000.0), ('repeater.temperature', r[7]), ('repeater.uptimeH', r[8] / 3600.0),
+                        ('repeater.noiseFloor', -115)]
+                done(True, vals, 'direkt %d Hop%s, 1200 ms' % (r[3], '' if r[3] == 1 else 's') if r[3] else 'Flood, 1500 ms')
+        threading.Thread(target=run, daemon=True).start()
+
+    def console(self):
+        if not self.con: return None
+        s = self.sess[self.con]
+        return {'key': self.con, 'name': self.name(self.con), 'admin': s['admin'], 'flood': False, 'hops': s['hops'], 'idleS': 3,
+                'busy': any(j['kind'] == 'cli' and j['state'] == 'running' for j in self.jobs.values())}
+
+
+rmt = FakeRemote()
 
 
 class FakeZbx:
@@ -888,6 +1016,45 @@ class H(BaseHTTPRequestHandler):
                 j = jobs.get(jid)
                 j = json.loads(json.dumps(j)) if j else None
             return self.send_json(j) if j else self.send_json({'error': 'Auftrag unbekannt'}, 404)
+        if u.path in ('/api/v1/channels', '/api/v1/messages'):   # Kanal-API (E43), wie WebUi.cpp
+            key = gwcfg.get('apiKey', '')
+            if not key: return self.send_json({'error': 'Kanal-API ist ausgeschaltet (System > Kanal-API)'}, 403)
+            got = self.headers.get('X-API-Key', '')
+            a = self.headers.get('Authorization', '')
+            if not got and a.startswith('Bearer '): got = a[7:]
+            if got.strip() != key: return self.send_json({'error': 'API-Schlüssel fehlt oder falsch (Header X-API-Key)'}, 401)
+            with lock:
+                if u.path == '/api/v1/channels':
+                    cl = [{k: c[k] for k in ('idx', 'name', 'kind', 'scope')} for c in chans.json()['channels']]
+                    return self.send_json({'boot': BOOT_ID, 'gateway': cli.p['name'], 'channels': cl})
+                since = int(q.get('since', ['0'])[0]); flt = q.get('channel', [''])[0]
+                L = logs['messages']
+                oldest = L[0]['s'] if L else seq['messages']
+                gap = 0 < since < oldest
+                rows = [l for l in L if l['s'] >= max(since, oldest)][:50]
+                nxt = (rows[-1]['s'] + 1) if rows else max(since, oldest)
+                out = []
+                for l in rows:
+                    f = l['x'].split('\t', 4)
+                    if l['t'] not in 'MS' or len(f) < 5 or (flt and f[1] != flt): continue
+                    snd, sep, txt = f[4].partition(': ')
+                    if not sep: snd, txt = '', f[4]
+                    out.append({'seq': l['s'], 'time': l['e'], 'dir': 'rx' if l['t'] == 'M' else 'tx', 'channelIdx': int(f[0]), 'channel': f[1],
+                                'sender': snd, 'text': txt, 'snr': float(f[2]) if f[2] else None, 'hops': int(f[3] or 0)})
+            return self.send_json({'boot': BOOT_ID, 'messages': out, 'next': nxt, 'gap': gap})
+        if u.path == '/api/apikey':
+            k = gwcfg.get('apiKey', '')
+            return self.send_json({'enabled': bool(k), 'key': k})
+        if u.path == '/api/remote':
+            with lock:
+                return self.send_json({'known': rmt.known(), 'console': rmt.console()})
+        if u.path == '/api/remote/job':
+            with lock:
+                j = rmt.jobs.get(int(q.get('id', ['0'])[0]))
+                if not j: return self.send_json({'error': 'Auftrag unbekannt'}, 404)
+                out = {k: j[k] for k in ('state', 'ms', 'flood', 'hops', 'admin', 'hidden', 'error', 'reply')}
+                if out['state'] == 'running': out['ms'] = int((time.time() - j['t']) * 1000)
+            return self.send_json(out)
         if u.path == '/api/profile':
             return self.send_json(PROFILE)
         if u.path == '/api/channels':
@@ -994,6 +1161,27 @@ class H(BaseHTTPRequestHandler):
             with lock:
                 err = smm.save(j)
             return self.send_json({'error': err}, 400) if err else self.send_json({'ok': True})
+        if u.path == '/api/apikey':
+            act = form.get('action', [''])[0]
+            if act == 'new': gwcfg['apiKey'] = os.urandom(16).hex(); evadd('SYS', 'Kanal-API: neuer Schlüssel erzeugt (alter ungültig)')
+            elif act == 'off': gwcfg['apiKey'] = ''; evadd('SYS', 'Kanal-API ausgeschaltet')
+            else: return self.send_json({'error': 'action = new oder off'}, 400)
+            return self.send_json({'ok': True, 'enabled': bool(gwcfg['apiKey']), 'key': gwcfg['apiKey']})
+        if u.path == '/api/remote/login':
+            key = form.get('key', [''])[0].strip().lower()
+            if not re.fullmatch(r'[0-9a-f]{64}', key): return self.send_json({'error': 'Öffentlicher Schlüssel: 64 Hex-Zeichen'}, 400)
+            with lock:
+                jid, err = rmt.login(key, form.get('pass', [''])[0])
+            return self.send_json({'ok': True, 'id': jid}) if jid else self.send_json({'error': err}, 400)
+        if u.path == '/api/remote/cmd':
+            with lock:
+                jid, err = rmt.cmd(form.get('cmd', [''])[0].strip())
+            return self.send_json({'ok': True, 'id': jid}) if jid else self.send_json({'error': err}, 400)
+        if u.path == '/api/remote/logout':
+            with lock:
+                if rmt.con: push('console', 's', '[%s] Fernkonsole beendet' % rmt.name(rmt.con))
+                rmt.con = None
+            return self.send_json({'ok': True})
         if u.path == '/api/sm/poll':
             i = int(form.get('idx', ['-1'])[0])
             with lock:

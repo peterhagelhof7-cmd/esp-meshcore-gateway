@@ -45,6 +45,7 @@ button:disabled{opacity:.5;cursor:default}
 .cli{display:flex;gap:8px;margin-top:10px}
 .cli input{font-family:ui-monospace,Consolas,monospace}
 .hint{font-size:13px;color:var(--muted);margin:8px 0 0}
+.hint a{color:var(--acc)}
 .chk{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--muted);margin:0}
 .chk input{width:auto}
 .form{display:grid;grid-template-columns:minmax(150px,240px) 1fr;gap:8px 16px;align-items:start}
@@ -143,6 +144,14 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <div class="view" id="v_console">
 <section>
 <h2>Konsole</h2>
+<div class="row" style="margin:0 0 10px" id="rmBar">
+<select id="rmTarget" style="flex:1;min-width:200px" title="Ziel der Befehle"><option value="">Dieses Gateway</option></select>
+<input id="rmKey" class="mono" maxlength="64" placeholder="Öffentlicher Schlüssel (64 Hex-Zeichen)" spellcheck="false" autocomplete="off" style="flex:2;min-width:200px" hidden>
+<input id="rmPass" type="password" maxlength="15" placeholder="Admin-Passwort des Repeaters" autocomplete="new-password" style="flex:1;min-width:160px" hidden>
+<button type="button" id="rmLogin" hidden>Anmelden</button>
+<button type="button" class="sec" id="rmLogout" hidden>Abmelden</button>
+</div>
+<p class="hint" id="rmState" style="margin:0 0 10px" hidden></p>
 <div class="term" id="conOut"></div>
 <form class="cli" id="cliForm" autocomplete="off">
 <input id="cliIn" list="cmdList" maxlength="159" placeholder="Befehl, z. B. ver, neighbors, get radio" spellcheck="false" autocapitalize="off">
@@ -150,7 +159,8 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 </form>
 <datalist id="cmdList"></datalist>
 <div class="row" id="quick"></div>
-<p class="hint">Offizielle MeshCore-Repeater-CLI mit den Rechten der seriellen Konsole. ↑/↓ blättert durch frühere Befehle. „log“ gibt den Datei-Log nur seriell aus. „poweroff“/„shutdown“ legt das Gateway schlafen, danach ist es nur per Reset/Stromtrennung wieder erreichbar.</p>
+<p class="hint"><a href="https://docs.meshcore.io/cli_commands/" target="_blank" rel="noopener">Offizielle MeshCore-Repeater-CLI</a> mit den Rechten der seriellen Konsole. ↑/↓ blättert durch frühere Befehle. „log“ gibt den Datei-Log nur seriell aus. „poweroff“/„shutdown“ legt das Gateway schlafen, danach ist es nur per Reset/Stromtrennung wieder erreichbar.</p>
+<p class="hint">Fernkonsole: oben einen anderen Repeater wählen (Liste aus empfangenen Adverts) und mit seinem Admin-Passwort anmelden. Befehle gehen dann per Funk an diesen Repeater, jede Antwort dauert einige Sekunden; kommt keine, einfach nochmal senden. Nach 15 min ohne Befehl endet die Fernkonsole.</p>
 </section>
 </div>
 
@@ -207,11 +217,14 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <p class="hint" id="smDevEmpty" hidden>Noch kein Sensormeter eingetragen.</p>
 <div class="form" style="margin-top:14px" id="smDevForm">
 <div class="grp" id="smDevTitle">Gerät hinzufügen</div>
+<label for="sdType">Typ</label><div class="fld"><select id="sdType"><option value="sensormeter">Sensormeter (LAN)</option><option value="repeater">Repeater (per Funk)</option></select></div>
 <label for="sdName">Name</label><div class="fld"><input id="sdName" maxlength="23" placeholder="z. B. Serverraum"></div>
-<label for="sdHost">Adresse</label><div class="fld"><input id="sdHost" maxlength="63" placeholder="10.10.0.148" spellcheck="false"><small>IP oder Hostname im LAN, abgefragt wird http://Adresse/api/sensors</small></div>
-<label for="sdPort">Port</label><div class="fld"><input id="sdPort" type="number" min="1" max="65535" value="80"></div>
-<label for="sdInt">Abfrage alle (s)</label><div class="fld"><input id="sdInt" type="number" min="10" max="3600" value="60"></div>
-<label for="sdUser">Login (optional)</label><div class="fld"><div class="radio4" style="grid-template-columns:1fr 1fr"><input id="sdUser" maxlength="15" placeholder="Benutzer" autocomplete="off"><input id="sdPass" type="password" maxlength="31" placeholder="Passwort" autocomplete="new-password"></div><small>Sensormeter liefern /api/sensors ohne Login</small></div>
+<label for="sdHost" class="smOnly">Adresse</label><div class="fld smOnly"><input id="sdHost" maxlength="63" placeholder="10.10.0.148" spellcheck="false"><small>IP oder Hostname im LAN, abgefragt wird http://Adresse/api/sensors</small></div>
+<label for="sdPort" class="smOnly">Port</label><div class="fld smOnly"><input id="sdPort" type="number" min="1" max="65535" value="80"></div>
+<label for="sdRpt" class="rpOnly" hidden>Repeater</label><div class="fld rpOnly" hidden><select id="sdRpt"></select><input id="sdKey" class="mono" maxlength="64" placeholder="Öffentlicher Schlüssel (64 Hex-Zeichen)" spellcheck="false" autocomplete="off" style="margin-top:6px"><small>Auswahl aus empfangenen Adverts oder Schlüssel eintragen (in der App beim Repeater bzw. per „get public.key“)</small></div>
+<label for="sdInt">Abfrage alle (s)</label><div class="fld"><input id="sdInt" type="number" min="10" max="3600" value="60"><small class="rpOnly" hidden>Repeater: 900–43200 s (15 min bis 12 h), Standard 3600. Nach einem Fehlversuch neuer Versuch nach 10 min.</small></div>
+<label for="sdUser" class="smOnly">Login (optional)</label><div class="fld smOnly"><div class="radio4" style="grid-template-columns:1fr 1fr"><input id="sdUser" maxlength="15" placeholder="Benutzer" autocomplete="off"><input id="sdPass" type="password" maxlength="31" placeholder="Passwort" autocomplete="new-password"></div><small>Sensormeter liefern /api/sensors ohne Login</small></div>
+<label for="sdRPass" class="rpOnly" hidden>Passwort</label><div class="fld rpOnly" hidden><input id="sdRPass" type="password" maxlength="15" placeholder="Gast-Passwort genügt" autocomplete="new-password"><small>Gast- oder Admin-Passwort des Repeaters (max. 15 Zeichen). Akku, Temperatur, Laufzeit und Rauschen liefert ein Repeater schon an Gäste. Ohne Gast-Passwort am Repeater: leer lassen.</small></div>
 <label>Optionen</label><div class="fld"><label class="chk"><input type="checkbox" id="sdOff" checked> Meldung, wenn nicht erreichbar</label><label class="chk"><input type="checkbox" id="sdEn" checked> aktiv</label></div>
 </div>
 <div class="row"><button type="button" id="sdSave">Gerät speichern</button><button type="button" class="sec" id="sdCancel" hidden>Abbrechen</button><span class="msg" id="sdMsg" style="margin:0"></span></div>
@@ -445,6 +458,16 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <div class="row"><a class="btn sec" id="lgDown" href="/api/log/download">Herunterladen</a><a class="btn sec" id="lgView" href="/api/log/download?inline=1" target="_blank" rel="noopener">Anzeigen</a><button type="button" class="sec" id="lgClear">Löschen</button><span class="msg" id="lgMsg" style="margin:0"></span></div>
 <p class="hint">Dauerhaft im Flash, übersteht Neustarts: Starts mit Grund (auch Abstürze), WLAN-Ereignisse, Befehle aus Web und serieller Konsole (Geheimnisse ausgeblendet), Meldungen der Überwachung, gesendete Kanalnachrichten, Updates. Paketverkehr und empfangene Kanalnachrichten stehen nur in den Live-Logs. Flash-schonend: höchstens 128 KB (2 × 64 KB im Wechsel, ältestes fällt weg), geschrieben wird gesammelt ab 4 KB, spätestens alle 15 min und vor jedem Neustart. Bei Absturz oder Stromausfall fehlen höchstens die letzten 15 min.</p>
 </section>
+
+<section style="margin-top:16px">
+<h2>Kanal-API</h2>
+<dl>
+<dt>Status</dt><dd id="ak_state">–</dd>
+<dt>Schlüssel</dt><dd><span class="mono" id="ak_key">–</span></dd>
+</dl>
+<div class="row"><button type="button" id="akNew">Schlüssel erzeugen</button><button type="button" class="sec" id="akShow" hidden>Anzeigen</button><button type="button" class="sec" id="akCopy" hidden>Kopieren</button><button type="button" class="sec" id="akOff" hidden>Ausschalten</button><span class="msg" id="akMsg" style="margin:0"></span></div>
+<p class="hint">Für andere Systeme im LAN (z. B. home-central → Telegram): nur lesender Zugriff auf Kanäle und Nachrichten, ohne Admin-Passwort. Anfrage mit Header <span class="mono">X-API-Key: &lt;Schlüssel&gt;</span>: <span class="mono">GET /api/v1/channels</span>, <span class="mono">GET /api/v1/messages?since=0</span> (optional <span class="mono">&amp;channel=Name</span>; Antwort enthält <span class="mono">next</span> für die nächste Abfrage). Neu erzeugen macht den alten Schlüssel sofort ungültig. Übertragung unverschlüsselt (HTTP) – nur im eigenen Netz nutzen.</p>
+</section>
 </div>
 
 <script>
@@ -460,12 +483,12 @@ function show(v){
   view=v;
   document.querySelectorAll('.view').forEach(e=>e.classList.toggle('on',e.id==='v_'+v));
   document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.dataset.v===v));
-  if(v==='console')setTimeout(()=>$('cliIn').focus(),0);
+  if(v==='console'){setTimeout(()=>$('cliIn').focus(),0);rmLoad()}
   if(v==='settings')openSettings();
   if(v==='status'){lastNb=Date.now();loadNeighbors()}
   if(v==='channels')loadChannels();
   if(v==='sm'){smLoad();zbLoad()}
-  if(v==='wifi')lgLoad();
+  if(v==='wifi'){lgLoad();akLoad()}
   tick();
 }
 window.onhashchange=()=>show(location.hash.slice(1));
@@ -595,15 +618,98 @@ let hist=[];try{hist=JSON.parse(store('cliHist')||'[]')}catch(e){}
 let hpos=hist.length;
 async function sendCmd(cmd){
   const key=Object.keys(DANGER).find(k=>cmd===k||cmd.startsWith(k+' '));
-  if(key&&!confirm(DANGER[key]+'\n\nBefehl wirklich ausführen?\n'+cmd))return;
+  const where=rm.con?'Ziel: '+rm.con.name+' (entfernter Repeater, per Funk)\n\n':'';
+  if(key&&!confirm(where+(rm.con?DANGER[key].replace('Das Gateway','Der Repeater').replace('auf dem Knoten','auf dem Repeater'):DANGER[key])+'\n\nBefehl wirklich ausführen?\n'+cmd))return;
   if(cmd&&hist[hist.length-1]!==cmd){hist.push(cmd);if(hist.length>50)hist.shift();store('cliHist',JSON.stringify(hist))}
   hpos=hist.length;
+  if(rm.con)return rmSend(cmd);
   try{
     const r=await fetch('/api/cli',{method:'POST',body:new URLSearchParams({cmd})});
     if(!r.ok){const j=await r.json().catch(()=>({}));con.add('F',j.error||('Fehler '+r.status))}
   }catch(e){con.add('F','Gateway nicht erreichbar')}
   // Antwort kommt über den Konsolen-Log, mehrmals kurz nachfragen
   for(const d of [150,400,900])setTimeout(con.poll,d);
+}
+
+/* ---------- Fernkonsole (E42) ---------- */
+// rm.con = angemeldetes Ziel (vom Gateway), rm.known = Repeater aus Adverts.
+const rm={con:null,known:[],busy:false,last:0};
+const keyShort=k=>k.slice(0,8).toUpperCase();
+async function rmJob(id,maxMs){
+  const t0=Date.now();
+  for(;;){
+    await new Promise(r=>setTimeout(r,700));
+    const r=await fetch('/api/remote/job?id='+id,{cache:'no-store'});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(j.error||('Fehler '+r.status));
+    if(j.state==='done'||j.state==='failed')return j;
+    if(Date.now()-t0>maxMs)throw new Error('Zeitüberschreitung');
+    con.poll();
+  }
+}
+function rmRoute(o){return o.flood?'Flood':('direkt, '+o.hops+' Hop'+(o.hops===1?'':'s'))}
+function rmUi(){
+  const sel=$('rmTarget'),cur=rm.con?rm.con.key:sel.value;
+  sel.innerHTML='';
+  const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.appendChild(o)};
+  add('','Dieses Gateway');
+  const list=rm.known.slice();
+  if(rm.con&&!list.some(k=>k.key===rm.con.key))list.unshift({key:rm.con.key,name:rm.con.name,hops:null,agoS:null,type:'repeater'});
+  list.forEach(k=>add(k.key,k.name+' · '+keyShort(k.key)+(k.type==='room'?' · Room-Server':'')+(k.hops!==null?' · '+(k.hops?k.hops+' Hops':'direkt')+' · vor '+ago(k.agoS):'')));
+  add('manual','Schlüssel eingeben …');
+  sel.value=cur;if(sel.selectedIndex<0)sel.value=cur&&cur.length===64?'manual':'';
+  const remote=sel.value!=='',manual=sel.value==='manual',on=!!rm.con&&rm.con.key===(manual?$('rmKey').value.trim().toLowerCase():sel.value);
+  $('rmKey').hidden=!manual;
+  $('rmPass').hidden=$('rmLogin').hidden=!remote||on;
+  $('rmLogout').hidden=!rm.con;
+  const st=$('rmState');
+  if(rm.con){
+    st.hidden=false;st.className='hint ok';
+    st.textContent='Fernkonsole: '+rm.con.name+' ('+keyShort(rm.con.key)+'), als '+(rm.con.admin?'Admin':'Gast')+' angemeldet, '+rmRoute(rm.con)+'. Befehle gehen per Funk an diesen Repeater.';
+  }else if(remote){st.hidden=false;st.className='hint';st.textContent='Mit dem Admin-Passwort des Repeaters anmelden. Das Passwort bleibt nicht gespeichert.'}
+  else st.hidden=true;
+  $('cliIn').placeholder=rm.con?'Befehl an '+rm.con.name+', z. B. ver, get radio':'Befehl, z. B. ver, neighbors, get radio';
+}
+async function rmLoad(){
+  try{
+    const j=await (await fetch('/api/remote',{cache:'no-store'})).json();
+    const was=rm.con;
+    rm.known=j.known||[];rm.con=j.console;rm.last=Date.now();
+    if(was&&!rm.con)con.poll();   // z. B. nach 15 min ohne Befehl beendet
+    rmUi();
+  }catch(e){}
+}
+$('rmTarget').onchange=()=>{if(rm.con&&$('rmTarget').value!==rm.con.key)rmLogoutNow(false);rmUi();if($('rmTarget').value==='manual')$('rmKey').focus();else if($('rmTarget').value)$('rmPass').focus()};
+$('rmKey').oninput=rmUi;
+async function rmLogoutNow(reload){try{await postForm('/api/remote/logout',{})}catch(e){}rm.con=null;if(reload!==false)$('rmTarget').value='';rmUi();con.poll()}
+$('rmLogout').onclick=()=>rmLogoutNow(true);
+$('rmPass').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();$('rmLogin').click()}};
+$('rmLogin').onclick=async()=>{
+  const key=($('rmTarget').value==='manual'?$('rmKey').value:$('rmTarget').value).trim().toLowerCase();
+  if(!/^[0-9a-f]{64}$/.test(key)){con.add('F','Öffentlicher Schlüssel: 64 Hex-Zeichen');return}
+  const b=$('rmLogin');b.disabled=true;b.textContent='Anmeldung …';
+  try{
+    const {id}=await postForm('/api/remote/login',{key,pass:$('rmPass').value});
+    $('rmPass').value='';
+    await rmJob(id,60000);   // Ergebnis steht im Konsolen-Log
+  }catch(e){con.add('F',e.message)}
+  b.disabled=false;b.textContent='Anmelden';
+  await rmLoad();con.poll();
+  if(rm.con)$('cliIn').focus();
+};
+async function rmSend(cmd){
+  if(!cmd){con.add('F','Leerer Befehl geht nicht an einen entfernten Repeater');return}
+  if(rm.busy){con.add('F','Vorheriger Befehl läuft noch');return}
+  rm.busy=true;
+  try{
+    const {id}=await postForm('/api/remote/cmd',{cmd});
+    con.poll();
+    const j=await rmJob(id,60000);
+    // Antworten mit Geheimnis stehen nicht im Log, nur hier
+    if(j.state==='done'&&j.hidden)con.add('r','['+rm.con.name+'] '+j.reply);
+  }catch(e){con.add('F',e.message)}
+  rm.busy=false;
+  con.poll();rmLoad();
 }
 $('cliForm').onsubmit=e=>{e.preventDefault();const c=$('cliIn').value;$('cliIn').value='';sendCmd(c.trim()===''?'':c.replace(/^\s+/,''))};
 $('cliIn').onkeydown=e=>{
@@ -861,12 +967,12 @@ function smRender(){
     const tr=document.createElement('tr');
     const td=(t,cls)=>{const e=document.createElement('td');if(cls)e.className=cls;if(t!==undefined)e.textContent=t;tr.appendChild(e);return e};
     td(d.name+(d.enabled?'':' (aus)'));
-    td(d.host+(d.port!==80?':'+d.port:''),'mono');
+    td(isRpt(d)?'Funk · '+keyShort(d.key||''):d.host+(d.port!==80?':'+d.port:''),'mono');
     const stc=td();
     if(!d.enabled)stc.textContent='deaktiviert';
-    else if(!s.polled)stc.textContent='wartet …';
-    else if(s.online){stc.textContent='✓ vor '+ago(s.lastOkAgoS);stc.className='ok'}
-    else{stc.textContent=(s.offline?'OFFLINE: ':'✗ ')+(s.error||'Fehler');stc.className='bad'}
+    else if(!s.polled)stc.textContent=s.busy?'fragt ab …':'wartet …';
+    else if(s.online){stc.textContent='✓ vor '+ago(s.lastOkAgoS)+(s.route?' ('+s.route+')':'')+(s.busy?' · fragt ab …':'');stc.className='ok'}
+    else{stc.textContent=(s.offline?'OFFLINE: ':'✗ ')+(s.error||'Fehler')+(s.busy?' · fragt ab …':'');stc.className='bad'}
     td((s.values||[]).map(v=>(v.sensor&&st.devices.length?v.sensor+' ':'')+v.label+' '+fmtVal(v.value)+v.unit).join(' · ')||'–');
     const a=td();
     [['abfragen',async()=>{await postForm('/api/sm/poll',{idx:i});setTimeout(smLoad,2500)}],
@@ -943,6 +1049,9 @@ function fillPaths(want){
   const s=smDevStatus(parseInt($('srDev').value));
   const sel=$('srPath'),cur=want||sel.value;sel.innerHTML='';
   const vals=(s.values||[]).slice();
+  // Entfernte Repeater werden selten abgefragt: feste Messwerte schon vorher anbieten
+  const dv=smCfg&&smCfg.devices[parseInt($('srDev').value)];
+  if(isRpt(dv))RPT_PATHS.forEach(([p,l,u])=>{if(!vals.some(v=>v.path===p))vals.push({path:p,label:l,unit:u,sensor:''})});
   if(cur&&!vals.some(v=>v.path===cur))vals.unshift({path:cur,label:cur,unit:'',sensor:''});
   vals.forEach(v=>{const o=document.createElement('option');o.value=v.path;o.textContent=v.path+(v.value!==undefined?'  ('+v.label+' '+fmtVal(v.value)+v.unit+')':'');sel.appendChild(o)});
   if(cur)sel.value=cur;
@@ -979,21 +1088,55 @@ $('ssSave').onclick=async()=>{
   smSetDirty=false;
   if(!await smSave(c,$('ssMsg'),'Gespeichert'))smSetDirty=true;
 };
+// Entfernte Repeater (E42): Typ wählt die Felder, Auswahl aus empfangenen Adverts
+const isRpt=d=>d&&d.type==='repeater';
+const RPT_PATHS=[['repeater.battery','Akku','V'],['repeater.temperature','Temperatur','°C'],['repeater.uptimeH','Laufzeit','h'],['repeater.noiseFloor','Rauschen','dBm']];
+function sdTypeUi(){
+  const r=$('sdType').value==='repeater';
+  document.querySelectorAll('#smDevForm .smOnly').forEach(e=>e.hidden=r);
+  document.querySelectorAll('#smDevForm .rpOnly').forEach(e=>e.hidden=!r);
+  const iv=$('sdInt');iv.min=r?900:10;iv.max=r?43200:3600;
+  if(r&&(parseInt(iv.value)||0)<900)iv.value=3600;
+  if(!r&&(parseInt(iv.value)||0)>3600)iv.value=60;
+  if(r)sdRptFill();
+}
+async function sdRptFill(){
+  try{const j=await (await fetch('/api/remote',{cache:'no-store'})).json();rm.known=j.known||[]}catch(e){}
+  const sel=$('sdRpt'),key=$('sdKey').value.trim().toLowerCase();sel.innerHTML='';
+  const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.appendChild(o)};
+  add('','– Schlüssel unten eintragen –');
+  rm.known.forEach(k=>add(k.key,k.name+' · '+keyShort(k.key)+' · '+(k.hops?k.hops+' Hops':'direkt')+' · vor '+ago(k.agoS)));
+  sel.value=key;if(sel.selectedIndex<0)sel.value='';
+}
+$('sdType').onchange=sdTypeUi;
+$('sdRpt').onchange=()=>{const k=rm.known.find(x=>x.key===$('sdRpt').value);if(!k)return;$('sdKey').value=k.key;if(!$('sdName').value.trim())$('sdName').value=k.name.slice(0,23)};
+$('sdKey').oninput=()=>{const v=$('sdKey').value.trim().toLowerCase();$('sdRpt').value=rm.known.some(k=>k.key===v)?v:''};
 function smDevEdit(i){
   smEditDev=i;const d=smCfg.devices[i];
-  $('sdName').value=d.name;$('sdHost').value=d.host;$('sdPort').value=d.port;$('sdInt').value=d.intervalS;
-  $('sdUser').value=d.user;$('sdPass').value=d.pass;$('sdOff').checked=d.offlineAlert;$('sdEn').checked=d.enabled;
+  $('sdType').value=isRpt(d)?'repeater':'sensormeter';
+  $('sdName').value=d.name;$('sdHost').value=d.host||'';$('sdPort').value=d.port||80;$('sdInt').value=d.intervalS;
+  $('sdUser').value=d.user||'';$('sdPass').value=isRpt(d)?'':d.pass;$('sdRPass').value=isRpt(d)?d.pass:'';$('sdKey').value=d.key||'';
+  $('sdOff').checked=d.offlineAlert;$('sdEn').checked=d.enabled;
+  sdTypeUi();
   $('smDevTitle').textContent='Gerät bearbeiten: '+d.name;$('sdCancel').hidden=false;$('sdName').focus();
 }
 function smDevReset(){
-  smEditDev=-1;['sdName','sdHost','sdUser','sdPass'].forEach(id=>$(id).value='');$('sdPort').value=80;$('sdInt').value=60;
+  smEditDev=-1;['sdName','sdHost','sdUser','sdPass','sdRPass','sdKey'].forEach(id=>$(id).value='');$('sdPort').value=80;$('sdInt').value=60;
+  $('sdType').value='sensormeter';sdTypeUi();
   $('sdOff').checked=$('sdEn').checked=true;$('smDevTitle').textContent='Gerät hinzufügen';$('sdCancel').hidden=true;
 }
 $('sdCancel').onclick=smDevReset;
 $('sdSave').onclick=async()=>{
-  const d={name:$('sdName').value.trim(),host:$('sdHost').value.trim(),port:parseInt($('sdPort').value)||80,intervalS:parseInt($('sdInt').value)||60,
-    user:$('sdUser').value.trim(),pass:$('sdPass').value,offlineAlert:$('sdOff').checked,enabled:$('sdEn').checked};
-  if(!d.name||!d.host){$('sdMsg').textContent='Name und Adresse angeben';$('sdMsg').className='msg bad';return}
+  let d;
+  if($('sdType').value==='repeater'){
+    d={type:'repeater',name:$('sdName').value.trim(),key:$('sdKey').value.trim().toLowerCase(),intervalS:parseInt($('sdInt').value)||3600,
+      pass:$('sdRPass').value,offlineAlert:$('sdOff').checked,enabled:$('sdEn').checked};
+    if(!d.name||!/^[0-9a-f]{64}$/.test(d.key)){$('sdMsg').textContent='Name und Repeater (öffentlicher Schlüssel, 64 Hex-Zeichen) angeben';$('sdMsg').className='msg bad';return}
+  }else{
+    d={type:'sensormeter',name:$('sdName').value.trim(),host:$('sdHost').value.trim(),port:parseInt($('sdPort').value)||80,intervalS:parseInt($('sdInt').value)||60,
+      user:$('sdUser').value.trim(),pass:$('sdPass').value,offlineAlert:$('sdOff').checked,enabled:$('sdEn').checked};
+    if(!d.name||!d.host){$('sdMsg').textContent='Name und Adresse angeben';$('sdMsg').className='msg bad';return}
+  }
   const c=smCfgForSave();
   if(smEditDev>=0){d.origIdx=smEditDev;c.devices[smEditDev]=d}else{if(c.devices.length>=8){$('sdMsg').textContent='Maximal 8 Geräte';$('sdMsg').className='msg bad';return}d.origIdx=-1;c.devices.push(d)}
   if(await smSave(c,$('sdMsg'),smEditDev>=0?'Gerät gespeichert':'Gerät angelegt, wird abgefragt …')){smDevReset();setTimeout(smLoad,3000)}
@@ -1514,6 +1657,29 @@ $('bkRestore').onclick=async()=>{
 
 /* ---------- Ereignis-Log (E27) ---------- */
 const kb=b=>(b/1024).toFixed(b<10240?1:0)+' KB';
+/* ---------- Kanal-API (E43) ---------- */
+let akKey='',akVisible=false;
+function akUi(){
+  const on=!!akKey;
+  set('ak_state',on?'eingeschaltet':'aus – erst Schlüssel erzeugen');
+  $('ak_state').className=on?'ok':'';
+  set('ak_key',on?(akVisible?akKey:akKey.slice(0,4)+'••••••••••••••••••••••••'+akKey.slice(-4)):'');
+  $('akNew').textContent=on?'Neu erzeugen':'Schlüssel erzeugen';
+  $('akShow').hidden=$('akCopy').hidden=$('akOff').hidden=!on;
+  $('akShow').textContent=akVisible?'Verbergen':'Anzeigen';
+}
+async function akLoad(){try{const j=await (await fetch('/api/apikey',{cache:'no-store'})).json();akKey=j.key||'';akUi()}catch(e){}}
+async function akPost(action,okText){
+  try{const j=await postForm('/api/apikey',{action});akKey=j.key||'';akVisible=!!akKey;akUi();$('akMsg').textContent=okText;$('akMsg').className='msg ok'}
+  catch(e){$('akMsg').textContent=e.message;$('akMsg').className='msg bad'}
+}
+$('akNew').onclick=()=>{if(akKey&&!confirm('Neuen Schlüssel erzeugen? Der alte gilt sofort nicht mehr – home-central & Co. brauchen dann den neuen.'))return;akPost('new','Neuer Schlüssel erzeugt')};
+$('akOff').onclick=()=>{if(!confirm('Kanal-API ausschalten? Abfragen mit dem Schlüssel schlagen dann fehl.'))return;akPost('off','Ausgeschaltet')};
+$('akShow').onclick=()=>{akVisible=!akVisible;akUi()};
+$('akCopy').onclick=async()=>{
+  try{await navigator.clipboard.writeText(akKey);$('akMsg').textContent='Kopiert';$('akMsg').className='msg ok'}
+  catch(e){akVisible=true;akUi();$('akMsg').textContent='Kopieren nicht möglich (nur über HTTPS/localhost) – bitte markieren';$('akMsg').className='msg warn'}
+};
 async function lgLoad(){
   try{const j=await (await fetch('/api/log/info',{cache:'no-store'})).json();
     set('lg_size',kb(j.fileBytes)+' von '+kb(j.maxBytes)+(j.dropped?' · '+j.dropped+' Zeilen verworfen':''));
@@ -1542,7 +1708,7 @@ function tick(){
   const now=Date.now();
   if(now-lastStatus>=5000){lastStatus=now;refresh()}
   if(view==='status'&&now-lastNb>=30000){lastNb=now;loadNeighbors()}
-  if(view==='console')con.poll();
+  if(view==='console'){con.poll();if(now-rm.last>=10000)rmLoad()}
   if(view==='packets')pkt.poll();
   if(view==='channels')msgs.poll();
   if(view==='sm'){smLogFeed.poll();if(now-lastSm>=3000){lastSm=now;smLoad();zbLoad()}}

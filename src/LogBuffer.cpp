@@ -76,6 +76,23 @@ static void appendEscaped(String& out, const char* s) {
   }
 }
 
+uint32_t LogBuffer::visit(uint32_t since, size_t maxLines, Visitor v, void* ctx, bool& gap) {
+  gap = false;
+  if (!_lines) return since;
+  xSemaphoreTake(_lock, portMAX_DELAY);
+  uint32_t newest = _nextSeq - 1;
+  uint32_t oldest = (_nextSeq > _cap) ? _nextSeq - _cap : 1;
+  uint32_t from = since;
+  if (from < oldest) {
+    if (since > 0 && newest > 0) gap = true;
+    from = oldest;
+  }
+  uint32_t seq = from;
+  for (size_t n = 0; seq <= newest && n < maxLines; seq++, n++) v(_lines[seq % _cap], ctx);
+  xSemaphoreGive(_lock);
+  return seq;
+}
+
 uint32_t LogBuffer::appendJson(uint32_t since, size_t maxLines, String& out, bool& gap) {
   gap = false;
   if (!_lines) return since;

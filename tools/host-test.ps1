@@ -79,5 +79,21 @@ if ($LASTEXITCODE -ne 0) { throw 'Compile zbx_format_test fehlgeschlagen' }
 Write-Host '== Zabbix-Format'
 Invoke-Test $exe @()
 
+# 5) Fernabfrage entfernter Repeater (E42)
+$exe = Join-Path $out 'remote_format_test.exe'
+& g++ -std=gnu++11 -O2 -static -Wall -Wextra -I (Join-Path $root 'src') `
+    (Join-Path $root 'test/host/remote_format_test.cpp') (Join-Path $root 'src/RemoteFormat.cpp') -o $exe
+if ($LASTEXITCODE -ne 0) { throw 'Compile remote_format_test fehlgeschlagen' }
+Write-Host '== Fernabfrage-Format'
+Invoke-Test $exe @()
+
+# 6) Kanal-API: Logzeile zerlegen (E43)
+$exe = Join-Path $out 'channel_line_test.exe'
+& g++ -std=gnu++11 -O2 -static -Wall -Wextra -I (Join-Path $root 'src') `
+    (Join-Path $root 'test/host/channel_line_test.cpp') (Join-Path $root 'src/ChannelLine.cpp') -o $exe
+if ($LASTEXITCODE -ne 0) { throw 'Compile channel_line_test fehlgeschlagen' }
+Write-Host '== Kanal-API'
+Invoke-Test $exe @()
+
 if ($failed) { Write-Host "$failed Testlauf/-laeufe mit Fehlern" -ForegroundColor Red; exit 1 }
 Write-Host 'Alle Host-Tests OK' -ForegroundColor Green

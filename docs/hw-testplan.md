@@ -108,3 +108,26 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 - [ ] Zabbix-Proxy stoppen → Alarm: kein ACK, Gateway wiederholt nach 5 min; Proxy starten → Empfänger liefert nach (≤ 30 s), ACK
 - [ ] Host in Zabbix umbenennen → Empfänger zeigt „abgelehnt“, kein ACK
 - [ ] Modus „eigener Zabbix-Kanal“: Alarmkanal ohne Kennung, Zabbix-Kanal mit; Empfänger-Kanalfilter auf Zabbix-Kanal
+
+## 13. Fernkonsole und entfernte Repeater (E42, 0.10.0) – braucht einen zweiten Repeater mit bekanntem Passwort
+- [ ] Konsole → Zielliste zeigt Repeater aus Adverts (z. B. Nachbar A1B2C3D4) mit Hops und Alter
+- [ ] Anmeldung mit falschem Passwort → nach ≤ 45 s „keine Antwort (Passwort falsch …)“
+- [ ] Anmeldung mit Admin-Passwort → „angemeldet als Admin“ (Flood/direkt, Zeit notieren)
+- [ ] `ver`, `get radio`, `neighbors`, `stats-core` → Antworten mit `[Name]`, Laufzeit je Befehl notieren; zweiter Befehl geht direkt (Pfad gelernt)
+- [ ] `get prv.key` → Antwort nur in der Konsole, nicht im Ereignis-Log
+- [ ] Gast-Anmeldung → CLI-Befehl abgelehnt mit Hinweis
+- [ ] Abmelden → Konsole wieder lokal (`ver` zeigt Gateway-Version)
+- [ ] Überwachung: Repeater (per Funk) mit Gast-Passwort → nach ≤ 1 min Akku/Temperatur/Laufzeit/Rauschen; Werte mit App vergleichen
+- [ ] Regel „Akku über (aktueller Wert − 0,5 V)“ → Meldung im Alarmkanal sofort nach Speichern; Regel wieder löschen
+- [ ] Ziel-Repeater ausschalten → nach Fehlversuchen „nicht erreichbar“ (Dauer notieren); einschalten → „wieder erreichbar“
+- [ ] Ziel-Repeater neu starten → nächste Abfrage meldet sich neu an (Status kommt), Laufzeit klein
+- [ ] Paket-Log: je Abfrage nur die erwarteten Pakete (ANON_REQ nur bei Neuanmeldung, REQ ×2)
+- [ ] 24 h laufen lassen: Heap/PSRAM stabil, keine Abstürze
+
+## 14. Kanal-API (E43, 0.10.0)
+- [ ] System → Kanal-API: „Schlüssel erzeugen“ → eingeschaltet, Schlüssel anzeigen/verbergen
+- [ ] `curl -H "X-API-Key: <Schlüssel>" http://<gateway>/api/v1/channels` → alle Kanäle, keine Kanalschlüssel
+- [ ] `…/api/v1/messages?since=0` → Nachrichten mit Absender/Text; Testnachricht aus der App erscheint mit `dir: rx`, Gateway-Alarm mit `dir: tx`
+- [ ] Ohne/mit falschem Schlüssel → 401; „Ausschalten“ → 403
+- [ ] Gateway neu starten → `boot` ändert sich
+- [ ] Schlüssel steht nicht im Ereignis-Log

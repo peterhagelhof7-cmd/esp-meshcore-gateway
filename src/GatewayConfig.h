@@ -19,6 +19,8 @@ struct GatewaySettings {
   // anmelden, Adresse auf Belegung prüfen, dann umschalten und das Gateway
   // (Router) prüfen; bei Fehler zurück auf DHCP.
   bool ipPendingCheck = false;
+  // Schlüssel der Kanal-API (E43), 32 Hex-Zeichen. Leer = API aus.
+  String apiKey;
 
   bool staticIp() const { return ipAddr.length() > 0; }
 };
