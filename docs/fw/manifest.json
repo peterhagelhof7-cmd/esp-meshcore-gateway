@@ -4,7 +4,7 @@
                      {
                          "version":  "0.8.0",
                          "built":  "2026-10-15",
-                         "status":  "test",
+                         "status":  "stable",
                          "meshcore":  "1.18.0",
                          "variants":  {
                                           "v4":  {
