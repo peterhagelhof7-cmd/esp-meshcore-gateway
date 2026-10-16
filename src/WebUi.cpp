@@ -430,8 +430,11 @@ static void handleApiSend(AsyncWebServerRequest* req) {
   size_t n = chan_line::utf8Cut(text.c_str(), room);
   bool cut = n < text.length();
   if (cut) text = text.substring(0, n);
+  // Erst prüfen, gezählt wird nur, was wirklich in die Warteschlange ging
+  // (ein 503 soll kein Kontingent verbrauchen). Alle Web-Handler laufen im
+  // selben Task, zwischen Prüfen und Zählen kommt keine andere Anfrage.
   s_apiLimit.setMaxPerHour(API_SEND_PER_HOUR);
-  if (!s_apiLimit.allow(millis())) {
+  if (s_apiLimit.usedInWindow(millis()) >= API_SEND_PER_HOUR) {
     req->send(429, "application/json", "{\"error\":\"Sendelimit erreicht (" + String(API_SEND_PER_HOUR) + " pro Stunde)\"}");
     return;
   }
@@ -439,6 +442,7 @@ static void handleApiSend(AsyncWebServerRequest* req) {
     req->send(503, "application/json", "{\"error\":\"Warteschlange voll, bitte kurz warten\"}");
     return;
   }
+  s_apiLimit.allow(millis());
   IPAddress ip = req->client() ? req->client()->remoteIP() : IPAddress();
   event_log::addf("API", "Senden in %s von %s%s", ch.c_str(), ip.toString().c_str(), cut ? " (gekürzt)" : "");
   req->send(200, "application/json", String("{\"ok\":true,\"truncated\":") + (cut ? "true" : "false") +

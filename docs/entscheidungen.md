@@ -877,6 +877,8 @@ Hardware, Gegenstelle home-central (noch nicht gebaut).
   oder den Alarmkanal, wenn der nicht freigegeben ist.
 - **10 Nachrichten pro Stunde** (eigener `rules::RateLimiter`, getrennt vom Sendelimit der Überwachung), danach
   HTTP 429. Grund: Funkzeit; Warnungen kommen selten, ein fehlerhafter Client soll den Kanal nicht fluten.
+  Erst prüfen (`usedInWindow`), gezählt (`allow`) wird erst nach erfolgreicher Übergabe an die Warteschlange –
+  ein 503 (Warteschlange voll) verbraucht kein Kontingent (Nachtrag 2026-10-17, User).
 - Text: Zeilenumbrüche/Tabs → Leerzeichen, **UTF-8-sicher gekürzt** auf den Platz nach „Gerätename: “
   (`chan_line::utf8Cut`, Host-Test). Die Antwort enthält den tatsächlich gesendeten Text und `truncated` – home-central
   nutzt ihn, um die eigenen Nachrichten beim Weiterleiten Mesh → Telegram herauszufiltern.

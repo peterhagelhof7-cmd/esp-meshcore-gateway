@@ -202,8 +202,9 @@ curl -H "X-API-Key: 3f9c…" --data-urlencode "channel=warnungen" \
 - **Länge:** Eine MeshCore-Kanalnachricht fasst 160 Byte inklusive „Gerätename: “. Längere Texte werden auf den
   Rest **gekürzt**, ohne ein UTF-8-Zeichen (Umlaut, Emoji) zu zerschneiden. Faustregel: etwa 140 Byte; Umlaute
   zählen 2, die meisten Emojis 4 Byte.
-- **Sendelimit:** höchstens **10 Nachrichten pro Stunde** (gleitendes Fenster), danach `429`. Das Limit gilt für
-  die API allein, unabhängig von den Meldungen der Überwachung.
+- **Sendelimit:** höchstens **10 Nachrichten pro Stunde** (gleitendes Fenster), danach `429`. Gezählt werden nur
+  angenommene Nachrichten (`200`); abgelehnte Anfragen (`4xx`, `503`) verbrauchen nichts. Das Limit gilt für die
+  API allein, unabhängig von den Meldungen der Überwachung.
 - `ok: true` heißt angenommen, nicht zugestellt: Kanalnachrichten sind Floods ohne Empfangsbestätigung.
 - Die gesendete Nachricht erscheint anschließend in `messages` mit `dir: "tx"`. Wer selbst sendet und gleichzeitig
   abonniert, sollte sich den zurückgemeldeten `text` merken und solche `tx`-Nachrichten überspringen (sonst Echo).
