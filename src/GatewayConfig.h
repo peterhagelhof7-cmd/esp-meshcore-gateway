@@ -21,6 +21,8 @@ struct GatewaySettings {
   bool ipPendingCheck = false;
   // Schlüssel der Kanal-API (E43), 32 Hex-Zeichen. Leer = API aus.
   String apiKey;
+  // Senden über die API erlaubt in diesem Kanal (Name, E44). Leer = nur lesen.
+  String apiSendChannel;
 
   bool staticIp() const { return ipAddr.length() > 0; }
 };

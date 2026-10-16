@@ -39,4 +39,13 @@ bool parse(char* buf, Parsed& out) {
   return true;
 }
 
+size_t utf8Cut(const char* text, size_t maxBytes) {
+  if (!text) return 0;
+  size_t n = strlen(text);
+  if (n <= maxBytes) return n;
+  n = maxBytes;
+  while (n > 0 && ((unsigned char)text[n] & 0xC0) == 0x80) n--;   // Folgebyte -> zurück zum Zeichenanfang
+  return n;
+}
+
 }  // namespace chan_line

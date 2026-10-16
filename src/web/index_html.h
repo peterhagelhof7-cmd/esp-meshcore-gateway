@@ -465,8 +465,10 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <dt>Status</dt><dd id="ak_state">–</dd>
 <dt>Schlüssel</dt><dd><span class="mono" id="ak_key">–</span></dd>
 </dl>
+<div class="row" id="akSendRow" hidden><label for="akSendCh" style="margin:0">Senden erlauben in</label><select id="akSendCh" style="flex:1;min-width:160px"></select><button type="button" class="sec" id="akSendSave">Übernehmen</button></div>
 <div class="row"><button type="button" id="akNew">Schlüssel erzeugen</button><button type="button" class="sec" id="akShow" hidden>Anzeigen</button><button type="button" class="sec" id="akCopy" hidden>Kopieren</button><button type="button" class="sec" id="akOff" hidden>Ausschalten</button><span class="msg" id="akMsg" style="margin:0"></span></div>
 <p class="hint">Für andere Systeme im LAN (z. B. home-central → Telegram): nur lesender Zugriff auf Kanäle und Nachrichten, ohne Admin-Passwort. Anfrage mit Header <span class="mono">X-API-Key: &lt;Schlüssel&gt;</span>: <span class="mono">GET /api/v1/channels</span>, <span class="mono">GET /api/v1/messages?since=0</span> (optional <span class="mono">&amp;channel=Name</span>; Antwort enthält <span class="mono">next</span> für die nächste Abfrage). Neu erzeugen macht den alten Schlüssel sofort ungültig. Übertragung unverschlüsselt (HTTP) – nur im eigenen Netz nutzen.</p>
+<p class="hint">Senden (z. B. Unwetter- und NINA-Warnungen von home-central): nur in den oben freigegebenen Kanal, höchstens <span id="akPerH">10</span> Nachrichten pro Stunde, <span class="mono">POST /api/v1/send</span> mit den Feldern <span class="mono">channel</span> und <span class="mono">text</span>. Zu lange Texte werden gekürzt.</p>
 </section>
 </div>
 
@@ -1658,9 +1660,19 @@ $('bkRestore').onclick=async()=>{
 /* ---------- Ereignis-Log (E27) ---------- */
 const kb=b=>(b/1024).toFixed(b<10240?1:0)+' KB';
 /* ---------- Kanal-API (E43) ---------- */
-let akKey='',akVisible=false;
+let akKey='',akVisible=false,akSend='';
+async function akSendFill(){
+  if(!channels.length)await loadChannels();
+  const sel=$('akSendCh');sel.innerHTML='';
+  const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.appendChild(o)};
+  add('','– nicht erlaubt (nur lesen) –');
+  channels.forEach(c=>add(c.name,c.name));
+  if(akSend&&!channels.some(c=>c.name===akSend))add(akSend,akSend+' (fehlt!)');
+  sel.value=akSend;
+}
 function akUi(){
   const on=!!akKey;
+  $('akSendRow').hidden=!on;
   set('ak_state',on?'eingeschaltet':'aus – erst Schlüssel erzeugen');
   $('ak_state').className=on?'ok':'';
   set('ak_key',on?(akVisible?akKey:akKey.slice(0,4)+'••••••••••••••••••••••••'+akKey.slice(-4)):'');
@@ -1668,11 +1680,13 @@ function akUi(){
   $('akShow').hidden=$('akCopy').hidden=$('akOff').hidden=!on;
   $('akShow').textContent=akVisible?'Verbergen':'Anzeigen';
 }
-async function akLoad(){try{const j=await (await fetch('/api/apikey',{cache:'no-store'})).json();akKey=j.key||'';akUi()}catch(e){}}
-async function akPost(action,okText){
-  try{const j=await postForm('/api/apikey',{action});akKey=j.key||'';akVisible=!!akKey;akUi();$('akMsg').textContent=okText;$('akMsg').className='msg ok'}
+function akTake(j){akKey=j.key||'';akSend=j.sendChannel||'';if(j.sendPerHour)$('akPerH').textContent=j.sendPerHour;akUi();akSendFill()}
+async function akLoad(){try{akTake(await (await fetch('/api/apikey',{cache:'no-store'})).json())}catch(e){}}
+async function akPost(action,okText,extra){
+  try{const j=await postForm('/api/apikey',Object.assign({action},extra||{}));akVisible=!!j.key&&action==='new'?true:akVisible;akTake(j);$('akMsg').textContent=okText;$('akMsg').className='msg ok'}
   catch(e){$('akMsg').textContent=e.message;$('akMsg').className='msg bad'}
 }
+$('akSendSave').onclick=()=>{const ch=$('akSendCh').value;akPost('sendch',ch?'Senden erlaubt in '+ch:'Senden nicht erlaubt',{channel:ch})};
 $('akNew').onclick=()=>{if(akKey&&!confirm('Neuen Schlüssel erzeugen? Der alte gilt sofort nicht mehr – home-central & Co. brauchen dann den neuen.'))return;akPost('new','Neuer Schlüssel erzeugt')};
 $('akOff').onclick=()=>{if(!confirm('Kanal-API ausschalten? Abfragen mit dem Schlüssel schlagen dann fehl.'))return;akPost('off','Ausgeschaltet')};
 $('akShow').onclick=()=>{akVisible=!akVisible;akUi()};

@@ -1044,7 +1044,7 @@ class H(BaseHTTPRequestHandler):
             return self.send_json({'boot': BOOT_ID, 'messages': out, 'next': nxt, 'gap': gap})
         if u.path == '/api/apikey':
             k = gwcfg.get('apiKey', '')
-            return self.send_json({'enabled': bool(k), 'key': k})
+            return self.send_json({'enabled': bool(k), 'key': k, 'sendChannel': gwcfg.get('apiSendCh', ''), 'sendPerHour': 10})
         if u.path == '/api/remote':
             with lock:
                 return self.send_json({'known': rmt.known(), 'console': rmt.console()})
@@ -1165,8 +1165,37 @@ class H(BaseHTTPRequestHandler):
             act = form.get('action', [''])[0]
             if act == 'new': gwcfg['apiKey'] = os.urandom(16).hex(); evadd('SYS', 'Kanal-API: neuer Schlüssel erzeugt (alter ungültig)')
             elif act == 'off': gwcfg['apiKey'] = ''; evadd('SYS', 'Kanal-API ausgeschaltet')
-            else: return self.send_json({'error': 'action = new oder off'}, 400)
-            return self.send_json({'ok': True, 'enabled': bool(gwcfg['apiKey']), 'key': gwcfg['apiKey']})
+            elif act == 'sendch':
+                ch = form.get('channel', [''])[0].strip()
+                if ch and smm.find(ch) < 0: return self.send_json({'error': 'Kanal unbekannt'}, 400)
+                gwcfg['apiSendCh'] = ch
+            else: return self.send_json({'error': 'action = new, off oder sendch'}, 400)
+            return self.send_json({'ok': True, 'enabled': bool(gwcfg['apiKey']), 'key': gwcfg['apiKey'],
+                                   'sendChannel': gwcfg.get('apiSendCh', ''), 'sendPerHour': 10})
+        if u.path == '/api/v1/send':   # E44, wie WebUi.cpp handleApiSend
+            key = gwcfg.get('apiKey', '')
+            if not key: return self.send_json({'error': 'Kanal-API ist ausgeschaltet (System > Kanal-API)'}, 403)
+            if self.headers.get('X-API-Key', '').strip() != key: return self.send_json({'error': 'API-Schlüssel fehlt oder falsch (Header X-API-Key)'}, 401)
+            allowed = gwcfg.get('apiSendCh', '')
+            ch = form.get('channel', [''])[0].strip()
+            if not allowed: return self.send_json({'error': 'Senden über die API ist nicht freigegeben (System > Kanal-API)'}, 403)
+            if ch != allowed: return self.send_json({'error': 'Senden nur in Kanal "%s" erlaubt' % allowed}, 403)
+            with lock:
+                i = smm.find(ch)
+                if i < 0: return self.send_json({'error': 'Kanal existiert nicht mehr'}, 404)
+                t = ' '.join(form.get('text', [''])[0].replace('\t', ' ').split('\n')).strip()
+                if not t: return self.send_json({'error': 'leerer Text'}, 400)
+                room = 160 - len(cli.p['name'].encode()) - 2
+                b = t.encode()
+                cut = len(b) > room
+                if cut: t = b[:room].decode('utf-8', 'ignore')
+                now = time.time()
+                gwcfg['apiSent'] = [x for x in gwcfg.get('apiSent', []) if now - x < 3600]
+                if len(gwcfg['apiSent']) >= 10: return self.send_json({'error': 'Sendelimit erreicht (10 pro Stunde)'}, 429)
+                gwcfg['apiSent'].append(now)
+                push('messages', 'S', '\t'.join([str(i), ch, '', '0', cli.p['name'] + ': ' + t]))
+                evadd('API', 'Senden in %s von %s%s' % (ch, self.client_address[0], ' (gekürzt)' if cut else ''))
+            return self.send_json({'ok': True, 'truncated': cut, 'text': t})
         if u.path == '/api/remote/login':
             key = form.get('key', [''])[0].strip().lower()
             if not re.fullmatch(r'[0-9a-f]{64}', key): return self.send_json({'error': 'Öffentlicher Schlüssel: 64 Hex-Zeichen'}, 400)

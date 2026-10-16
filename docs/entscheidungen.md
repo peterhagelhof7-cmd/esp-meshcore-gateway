@@ -868,3 +868,24 @@ ohne SNR, ohne Absender, ungültige Zeilen), UI-Test 254/254 (neu 15: aus → 40
 falscher Schlüssel → 401, Kanäle ohne Geheimnisse, Bearer, Nachrichten rx/tx, Zeiger ohne Doppelte, Kanalfilter,
 neu erzeugt → alter ungültig, Schlüssel nicht im Ereignis-Log, ausgeschaltet → 403). **Nicht getestet:** auf echter
 Hardware, Gegenstelle home-central (noch nicht gebaut).
+
+## E44 – Senden über die Kanal-API (2026-10-17, User: „home-central soll warnungen (katwarn / nina etc.) auch in den mesh puschen, baue dies in beiden seiten ein“), 0.10.0
+
+- `POST /api/v1/send` (Formular: `channel`, `text`) mit demselben API-Schlüssel wie E43. Senden ist **zusätzlich**
+  freizugeben: System → Kanal-API → „Senden erlauben in“ **genau einem** Kanal (NVS `gw/api_send_ch`, leer = nur
+  lesen). Ein abgegriffener Schlüssel kann so höchstens in diesen einen Kanal schreiben, nie in private Kanäle
+  oder den Alarmkanal, wenn der nicht freigegeben ist.
+- **10 Nachrichten pro Stunde** (eigener `rules::RateLimiter`, getrennt vom Sendelimit der Überwachung), danach
+  HTTP 429. Grund: Funkzeit; Warnungen kommen selten, ein fehlerhafter Client soll den Kanal nicht fluten.
+- Text: Zeilenumbrüche/Tabs → Leerzeichen, **UTF-8-sicher gekürzt** auf den Platz nach „Gerätename: “
+  (`chan_line::utf8Cut`, Host-Test). Die Antwort enthält den tatsächlich gesendeten Text und `truncated` – home-central
+  nutzt ihn, um die eigenen Nachrichten beim Weiterleiten Mesh → Telegram herauszufiltern.
+- Ereignis-Log `API  Senden in <Kanal> von <IP>` (ohne Text; der steht ohnehin als gesendete Kanalnachricht im Log).
+- Gegenseite home-central 0.3.0: DWD, NINA (MoWaS, KATWARN, BIWAPP, Polizei, Hochwasser) und Windböen, je Art
+  abschaltbar, jede Warnung einmal (gleicher Mechanismus wie Telegram/ntfy).
+
+**Verifikation:** Build V4 grün, Host-Test utf8Cut (2-, 3-, 4-Byte-Zeichen), UI-Test 266/266 (neu 12: ohne Freigabe/
+anderer Kanal → 403, falscher Schlüssel → 401, Freigabe in der Oberfläche, gesendet als tx im Kanal, Kürzung UTF-8-
+sicher, leer → 400, 10/h dann 429, Ereignis-Log, Freigabe zurücknehmen). home-central gegen den Mock: Warnung
+einmal im Mesh, Zeilen zusammengezogen, eigene Warnung nicht zurück nach Telegram, abgewählte Art nicht gesendet.
+**Nicht getestet:** auf echter Hardware.

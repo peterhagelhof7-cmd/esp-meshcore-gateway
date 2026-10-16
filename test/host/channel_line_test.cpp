@@ -45,6 +45,19 @@ int main() {
     char c[] = "";
     check("Leer -> ungültig", !chan_line::parse(c, p));
   }
+  {
+    const char* a = "Warnung";
+    check("utf8Cut: kurz bleibt", chan_line::utf8Cut(a, 20) == 7);
+    check("utf8Cut: ASCII exakt", chan_line::utf8Cut(a, 4) == 4);
+    const char* b = "Sturmb\xC3\xB6" "en";   // "Sturmböen", ö = 2 Byte ab Position 6
+    check("utf8Cut: nicht im ö", chan_line::utf8Cut(b, 7) == 6, std::to_string(chan_line::utf8Cut(b, 7)));
+    check("utf8Cut: hinter ö", chan_line::utf8Cut(b, 8) == 8);
+    const char* c = "\xE2\x9A\xA0 Achtung";   // ⚠ = 3 Byte
+    check("utf8Cut: 3-Byte-Zeichen ganz weg", chan_line::utf8Cut(c, 2) == 0);
+    const char* d = "x\xF0\x9F\x8C\xA9";        // Emoji 4 Byte
+    check("utf8Cut: 4-Byte-Emoji", chan_line::utf8Cut(d, 4) == 1 && chan_line::utf8Cut(d, 5) == 5);
+    check("utf8Cut: nullptr", chan_line::utf8Cut(nullptr, 5) == 0);
+  }
   printf(fails ? "%d FEHLER\n" : "ALLE OK\n", fails);
   return fails ? 1 : 0;
 }

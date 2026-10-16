@@ -21,6 +21,7 @@
 #include "Profile.h"
 #include "RemoteAdmin.h"
 #include "RemoteFormat.h"
+#include "RuleEngine.h"
 #include "SmConfig.h"
 #include "SmPoller.h"
 #include "ZbxForwarder.h"
@@ -295,6 +296,7 @@ static void handleCli(AsyncWebServerRequest* req) {
 // ---------------------------------------------------------------------------
 
 static uint32_t s_bootId = 0;   // ändert sich bei jedem Start -> Client setzt seinen Zeiger zurück
+static const int API_SEND_PER_HOUR = 10;   // E44: Funkzeit schonen
 
 static bool apiAuth(AsyncWebServerRequest* req) {
   String key = gw_config.get().apiKey;
@@ -382,10 +384,65 @@ static void handleApiMessages(AsyncWebServerRequest* req) {
 }
 
 // Verwaltung des Schlüssels (Admin-Login)
+static String apiKeyJson(const GatewaySettings& s) {
+  return String("{\"ok\":true,\"enabled\":") + (s.apiKey.length() ? "true" : "false") + ",\"key\":\"" + s.apiKey +
+         "\",\"sendChannel\":\"" + jsonEscape(s.apiSendChannel) + "\",\"sendPerHour\":" + String(API_SEND_PER_HOUR) + "}";
+}
+
 static void handleApiKeyGet(AsyncWebServerRequest* req) {
   if (!checkAuth(req)) return;
-  String key = gw_config.get().apiKey;
-  req->send(200, "application/json", String("{\"enabled\":") + (key.length() ? "true" : "false") + ",\"key\":\"" + key + "\"}");
+  req->send(200, "application/json", apiKeyJson(gw_config.get()));
+}
+
+// E44: Senden über die API, nur in den freigegebenen Kanal, begrenzt pro Stunde
+// (Funkzeit). Text wird UTF-8-sicher auf den Platz nach "Gerätename: " gekürzt.
+static rules::RateLimiter s_apiLimit;
+
+static void handleApiSend(AsyncWebServerRequest* req) {
+  if (!apiAuth(req)) return;
+  const String allowed = gw_config.get().apiSendChannel;
+  String ch = formParam(req, "channel");
+  ch.trim();
+  if (allowed.isEmpty()) {
+    req->send(403, "application/json", "{\"error\":\"Senden über die API ist nicht freigegeben (System > Kanal-API)\"}");
+    return;
+  }
+  if (ch != allowed) {
+    req->send(403, "application/json", "{\"error\":\"Senden nur in Kanal \\\"" + jsonEscape(allowed) + "\\\" erlaubt\"}");
+    return;
+  }
+  int idx = channel_store::findByName(ch.c_str());
+  if (idx < 0) {
+    req->send(404, "application/json", "{\"error\":\"Kanal existiert nicht mehr\"}");
+    return;
+  }
+  String text = formParam(req, "text");
+  text.replace("\r", "");
+  text.replace("\n", " ");
+  text.replace("\t", " ");
+  text.trim();
+  if (text.isEmpty()) {
+    req->send(400, "application/json", "{\"error\":\"leerer Text\"}");
+    return;
+  }
+  size_t used = strlen(gateway_status::get().nodeName) + 2;   // "Name: " stellt sendChannelText voran
+  size_t room = used < mesh_actions::MAX_TEXT - 20 ? mesh_actions::MAX_TEXT - used : 20;
+  size_t n = chan_line::utf8Cut(text.c_str(), room);
+  bool cut = n < text.length();
+  if (cut) text = text.substring(0, n);
+  s_apiLimit.setMaxPerHour(API_SEND_PER_HOUR);
+  if (!s_apiLimit.allow(millis())) {
+    req->send(429, "application/json", "{\"error\":\"Sendelimit erreicht (" + String(API_SEND_PER_HOUR) + " pro Stunde)\"}");
+    return;
+  }
+  if (!mesh_actions::sendChannel(idx, text.c_str(), mesh_actions::Origin::API)) {
+    req->send(503, "application/json", "{\"error\":\"Warteschlange voll, bitte kurz warten\"}");
+    return;
+  }
+  IPAddress ip = req->client() ? req->client()->remoteIP() : IPAddress();
+  event_log::addf("API", "Senden in %s von %s%s", ch.c_str(), ip.toString().c_str(), cut ? " (gekürzt)" : "");
+  req->send(200, "application/json", String("{\"ok\":true,\"truncated\":") + (cut ? "true" : "false") +
+                                         ",\"text\":\"" + jsonEscape(text) + "\"}");
 }
 
 static void handleApiKeyPost(AsyncWebServerRequest* req) {
@@ -402,13 +459,21 @@ static void handleApiKeyPost(AsyncWebServerRequest* req) {
   } else if (action == "off") {
     s.apiKey = "";
     event_log::add("SYS", "Kanal-API ausgeschaltet");
+  } else if (action == "sendch") {
+    String ch = formParam(req, "channel");
+    ch.trim();
+    if (ch.length() && channel_store::findByName(ch.c_str()) < 0) {
+      req->send(400, "application/json", "{\"error\":\"Kanal unbekannt\"}");
+      return;
+    }
+    s.apiSendChannel = ch;
+    event_log::addf("SYS", "Kanal-API: Senden %s%s", ch.length() ? "erlaubt in " : "nicht erlaubt", ch.c_str());
   } else {
-    req->send(400, "application/json", "{\"error\":\"action = new oder off\"}");
+    req->send(400, "application/json", "{\"error\":\"action = new, off oder sendch\"}");
     return;
   }
   gw_config.set(s);
-  req->send(200, "application/json", String("{\"ok\":true,\"enabled\":") + (s.apiKey.length() ? "true" : "false") +
-                                         ",\"key\":\"" + s.apiKey + "\"}");
+  req->send(200, "application/json", apiKeyJson(s));
 }
 
 // ---------------------------------------------------------------------------
@@ -963,6 +1028,7 @@ void web_ui::begin() {
   server.on(AsyncURIMatcher::exact("/api/console"), HTTP_GET, [](AsyncWebServerRequest* req) { sendLog(req, console_log); });
   server.on(AsyncURIMatcher::exact("/api/v1/channels"), HTTP_GET, handleApiChannels);
   server.on(AsyncURIMatcher::exact("/api/v1/messages"), HTTP_GET, handleApiMessages);
+  server.on(AsyncURIMatcher::exact("/api/v1/send"), HTTP_POST, handleApiSend);
   server.on(AsyncURIMatcher::exact("/api/apikey"), HTTP_GET, handleApiKeyGet);
   server.on(AsyncURIMatcher::exact("/api/apikey"), HTTP_POST, handleApiKeyPost);
   server.on(AsyncURIMatcher::exact("/api/remote"), HTTP_GET, handleRemoteGet);

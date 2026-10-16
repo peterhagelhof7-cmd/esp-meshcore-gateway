@@ -25,6 +25,7 @@ void GatewayConfig::begin() {
   _s.ipDns2 = p.getString("ip_dns2", "");
   _s.ipPendingCheck = p.getBool("ip_check", false);
   _s.apiKey = p.getString("api_key", "");
+  _s.apiSendChannel = p.getString("api_send_ch", "");
   p.end();
 }
 
@@ -89,5 +90,6 @@ void GatewayConfig::set(const GatewaySettings& s) {
   p.putString("ip_dns2", _s.ipDns2);
   p.putBool("ip_check", _s.ipPendingCheck);
   p.putString("api_key", _s.apiKey);
+  p.putString("api_send_ch", _s.apiSendChannel);
   p.end();
 }

@@ -131,3 +131,4 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 - [ ] Ohne/mit falschem Schlüssel → 401; „Ausschalten“ → 403
 - [ ] Gateway neu starten → `boot` ändert sich
 - [ ] Schlüssel steht nicht im Ereignis-Log
+- [ ] E44: „Senden erlauben in“ Testkanal → `curl -H "X-API-Key: …" -d channel=<Kanal> -d "text=Test äöü ⚠" http://<gateway>/api/v1/send` → Nachricht in der App mit Umlauten/Emoji; anderer Kanal → 403; 11. Nachricht in der Stunde → 429

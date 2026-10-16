@@ -50,7 +50,8 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind beide wählbar.
 - **Entfernte Repeater überwachen:** Akku, Temperatur, Laufzeit und Rauschen anderer Repeater regelmäßig per Funk
   abfragen (Gast-Passwort genügt). Grenzwerte, Neustart-Erkennung und „nicht erreichbar“ melden in den Alarmkanal.
 - **Kanal-API:** Kanäle und Nachrichten für andere Systeme im LAN abrufbar (nur lesend, API-Schlüssel wird auf dem
-  Gerät erzeugt), z. B. zum Weiterleiten eines Kanals nach Telegram.
+  Gerät erzeugt), z. B. zum Weiterleiten eines Kanals nach Telegram. Optional Senden in einen freigegebenen Kanal,
+  etwa für Unwetter- und Katastrophenwarnungen (DWD, NINA/KATWARN) aus home-central.
 
 ## Installieren
 

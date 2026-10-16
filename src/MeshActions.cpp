@@ -35,7 +35,7 @@ void mesh_actions::process() {
   if (!the_mesh.sendChannelText(a.channel, a.text, err, sizeof(err))) {
     char line[LogBuffer::LINE_LEN];
     snprintf(line, sizeof(line), "Senden fehlgeschlagen (%s): %s",
-             a.origin == Origin::ALERT ? "Alarm" : (a.origin == Origin::ZBX ? "Zabbix-ACK" : "Web"), err);
+             a.origin == Origin::ALERT ? "Alarm" : (a.origin == Origin::ZBX ? "Zabbix-ACK" : (a.origin == Origin::API ? "API" : "Web")), err);
     console_log.push('s', the_mesh.getRTCClock()->getCurrentTime(), line);
   }
 }

@@ -325,6 +325,12 @@ Admin-Passwort.
   `since=0` beginnen. `gap: true` heißt: dazwischen sind Nachrichten verloren gegangen (das Gateway hält die
   letzten 200 Kanal-Zeilen im RAM).
 - Beispiel: `curl -H "X-API-Key: 0123…" "http://de-by-ort01-gw/api/v1/messages?since=0&channel=haus-alarm"`
+- **Senden** (z. B. Unwetter- und NINA/KATWARN-Warnungen von home-central): unter Kanal-API **„Senden erlauben in“**
+  einen Kanal wählen und „Übernehmen“. Nur in diesen einen Kanal darf über die API gesendet werden, höchstens
+  **10 Nachrichten pro Stunde**. Anfrage `POST /api/v1/send` mit den Formularfeldern `channel` und `text`, Antwort
+  `{"ok":true,"truncated":false,"text":"…"}`. Zu lange Texte werden gekürzt (Platz ca. 140 Zeichen nach dem
+  Gerätenamen). Fehler: 403 nicht freigegeben/anderer Kanal, 429 Stundenlimit erreicht.
+  Beispiel: `curl -H "X-API-Key: 0123…" -d channel=warnungen -d "text=Sturmwarnung" http://de-by-ort01-gw/api/v1/send`
 - Die Übertragung ist unverschlüsselt (HTTP), wie die ganze Weboberfläche: nur im eigenen Netz verwenden. Der
   Schlüssel ist nicht im Backup; nach einer Wiederherstellung neu erzeugen.
 

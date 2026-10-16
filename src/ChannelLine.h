@@ -24,4 +24,8 @@ struct Parsed {
 // buf wird verändert (Tabs/Trenner durch Nullen ersetzt). false = kein gültiges Format.
 bool parse(char* buf, Parsed& out);
 
+// Länge in Byte, auf die text höchstens maxBytes lang wird, ohne ein
+// UTF-8-Zeichen zu zerschneiden (Senden über die API, E44).
+size_t utf8Cut(const char* text, size_t maxBytes);
+
 }  // namespace chan_line

@@ -78,7 +78,7 @@ async function runCli(page, cmd) {
   {
     const until = async (fn, ms = 8000) => { const s = Date.now(); while (Date.now() - s < ms) { if (await fn()) return true; await sleep(200); } return false; };
     const conTxt = () => page.$eval('#conOut', e => e.innerText);
-    const send = async c => { await page.$eval('#cliIn', e => e.value = ''); await page.type('#cliIn', c); await page.keyboard.press('Enter'); };
+    const send = async c => { await until(async () => !(await page.evaluate(() => rm.busy))); await page.$eval('#cliIn', e => e.value = ''); await page.type('#cliIn', c); await page.keyboard.press('Enter'); };
     check('Fernkonsole: Link auf offizielle CLI-Doku', (await page.$eval('#v_console a[href="https://docs.meshcore.io/cli_commands/"]', e => e.target)) === '_blank');
     const opts = await page.$$eval('#rmTarget option', o => o.map(x => x.textContent));
     check('Fernkonsole: Ziele aus Adverts', opts[0] === 'Dieses Gateway' && opts.some(t => t.startsWith('Solar-Hof · A1B2C3D4 · 2 Hops')) &&
@@ -878,6 +878,34 @@ async function runCli(page, cmd) {
     check('API: mit next keine alten Nachrichten doppelt', m2.j.messages.every(m => m.seq >= cur), cur + ' ' + JSON.stringify(m2.j.messages.map(m => m.seq)));
     const mf = await api('/api/v1/messages?since=0&channel=' + encodeURIComponent('#test'), { 'X-API-Key': key1 });
     check('API: Filter nach Kanal', mf.j.messages.length > 0 && mf.j.messages.every(m => m.channel === '#test'), mf.j.messages.length + '');
+    // Senden über die API (E44)
+    const apiSend = (ch, text, k) => page.evaluate(async (c, x, kk) => { const r = await fetch('/api/v1/send', { method: 'POST', headers: { 'X-API-Key': kk },
+      body: new URLSearchParams({ channel: c, text: x }) }); return { code: r.status, j: await r.json() }; }, ch, text, k);
+    check('API-Senden: ohne Freigabe -> 403', (await apiSend('#test', 'x', key1)).code === 403);
+    check('API-Senden: Kanalauswahl sichtbar', !(await page.$eval('#akSendRow', e => e.hidden)) &&
+          (await page.$$eval('#akSendCh option', o => o.map(x => x.value))).includes('#test'));
+    await page.select('#akSendCh', '#test');
+    await page.click('#akSendSave');
+    check('API-Senden: freigegeben', await until(async () => (await t('#akMsg')) === 'Senden erlaubt in #test'), await t('#akMsg'));
+    check('API-Senden: anderer Kanal -> 403', (await apiSend('sensormeter', 'x', key1)).code === 403);
+    check('API-Senden: falscher Schlüssel -> 401', (await apiSend('#test', 'x', '0'.repeat(32))).code === 401);
+    const s1 = await apiSend('#test', '⚠ Wetterwarnung: Amtliche WARNUNG vor STURMBÖEN', key1);
+    check('API-Senden: gesendet', s1.code === 200 && s1.j.ok && !s1.j.truncated && s1.j.text === '⚠ Wetterwarnung: Amtliche WARNUNG vor STURMBÖEN', JSON.stringify(s1.j));
+    let txAll = [], cur2 = 0;
+    for (let k = 0; k < 20; k++) { const r = await api('/api/v1/messages?since=' + cur2 + '&channel=%23test', { 'X-API-Key': key1 }); txAll = txAll.concat(r.j.messages); if (r.j.next === cur2) break; cur2 = r.j.next; }
+    check('API-Senden: als tx im Kanal', txAll.some(m => m.dir === 'tx' && m.text === s1.j.text), JSON.stringify(txAll.slice(-1)));
+    const s2 = await apiSend('#test', 'Ä'.repeat(100), key1);
+    check('API-Senden: zu lang -> UTF-8-sicher gekürzt', s2.code === 200 && s2.j.truncated && /^Ä+$/.test(s2.j.text) &&
+          new TextEncoder().encode(s2.j.text).length <= 158 - new TextEncoder().encode((await page.evaluate(async () => (await (await fetch('/api/status')).json()).node.name))).length, s2.j.text.length);
+    check('API-Senden: leer -> 400', (await apiSend('#test', '   ', key1)).code === 400);
+    let lim = 0;
+    for (let k = 0; k < 10; k++) { const r = await apiSend('#test', 'Test ' + k, key1); if (r.code === 429) { lim = k; break; } }
+    check('API-Senden: 10 pro Stunde, dann 429', lim === 8, lim);
+    const lgs = await page.evaluate(async () => (await fetch('/api/log/download')).text());
+    check('API-Senden: im Ereignis-Log', /API   Senden in #test von 127\.0\.0\.1/.test(lgs) && lgs.includes('(gekürzt)'));
+    await page.select('#akSendCh', '');
+    await page.click('#akSendSave');
+    check('API-Senden: wieder nur lesen', await until(async () => (await t('#akMsg')) === 'Senden nicht erlaubt') && (await apiSend('#test', 'x', key1)).code === 403);
     await page.click('#akNew');   // Rückfrage wird angenommen
     check('API: neu erzeugt -> alter Schlüssel ungültig', await until(async () => (await t('#ak_key')) !== key1 && /^[0-9a-f]{32}$/.test(await t('#ak_key'))) &&
           (await api('/api/v1/channels', { 'X-API-Key': key1 })).code === 401 && (await api('/api/v1/channels', { 'X-API-Key': await t('#ak_key') })).code === 200);
