@@ -92,10 +92,10 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 - [ ] Testregel danach wieder löschen
 
 ## 11. Feste IP (E40, 0.9.0)
-- [ ] System → WLAN: Haken „feste IP“ → Felder mit aktuellen Werten (IP, 255.255.255.0, Router 10.10.0.1)
-- [ ] „Adresse prüfen“ mit IP eines vorhandenen Geräts (z. B. Sensormeter .148) → „BELEGT“ mit MAC; Speichern abgelehnt
-- [ ] „Adresse prüfen“ mit Windows-PC-IP (Ping meist geblockt) → trotzdem „BELEGT“ (ARP)
-- [ ] Freie Adresse speichern → Neustart, Ereignis-Log: „prüfe, ob die Adresse frei ist“ → „Feste IP … aktiv, Router … erreichbar“; Weboberfläche unter neuer IP, Status „Adressvergabe: fest“
+- [x] System → WLAN: Haken „feste IP“ → Felder mit aktuellen Werten (IP, 255.255.255.0, Router wie per DHCP, hier 10.10.0.254)
+- [x] „Adresse prüfen“ mit IP eines vorhandenen Geräts (z. B. Sensormeter .148) → „BELEGT“ mit MAC; Speichern abgelehnt
+- [x] „Adresse prüfen“ mit Windows-PC-IP (Ping meist geblockt) → trotzdem „BELEGT“ (ARP)
+- [x] Freie Adresse speichern → Neustart, Ereignis-Log: „prüfe, ob die Adresse frei ist“ → „Feste IP … aktiv, Router … erreichbar“; Weboberfläche unter neuer IP, Status „Adressvergabe: fest“
 - [ ] Danach Neustart ohne Prüfung (feste IP sofort), NTP/Sensormeter-Abfrage/Ping-Check laufen
 - [ ] Falschen Router eintragen (z. B. .253, im Subnetz, nicht vorhanden) → nach Neustart zurück auf DHCP, Grund im WLAN-Tab und Log
 - [ ] Haken weg → wieder DHCP
