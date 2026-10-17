@@ -206,6 +206,21 @@ void GatewayMesh::onAdvertRecv(mesh::Packet* packet, const mesh::Identity& id, u
   }
 }
 
+// Antworten auf die Nachbarsuche (nach dem Start, CLI "discover.neighbors")
+// tragen den vollen Schlüssel, aber keinen Namen. Ohne diesen Hook stünde ein
+// Nachbar, der selten ein Advert sendet, stundenlang nicht in der Zielliste,
+// obwohl "neighbors" ihn längst zeigt. Den Tag prüft MyMesh (privat); ein
+// unverlangter Eintrag hier füllt nur die Auswahl, Zugriff braucht weiter ein
+// Passwort. Der Name kommt mit dem nächsten Advert.
+void GatewayMesh::onControlDataRecv(mesh::Packet* packet) {
+  MyMesh::onControlDataRecv(packet);
+  static const uint8_t DISCOVER_RESP = 0x90;   // CTL_TYPE_NODE_DISCOVER_RESP in MyMesh.cpp
+  if ((packet->payload[0] & 0xF0) == DISCOVER_RESP && (packet->payload[0] & 0x0F) == ADV_TYPE_REPEATER &&
+      packet->payload_len >= 6 + PUB_KEY_SIZE) {
+    remote::onAdvert(&packet->payload[6], nullptr, ADV_TYPE_REPEATER, 0, packet->getSNR());
+  }
+}
+
 int GatewayMesh::searchPeersByHash(const uint8_t* hash) {
   _remoteN = remote::matchHash(hash[0], _remoteIdx, MAX_REMOTE_MATCH);
   _baseN = MyMesh::searchPeersByHash(hash);

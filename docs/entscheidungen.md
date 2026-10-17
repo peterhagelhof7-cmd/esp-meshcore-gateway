@@ -844,6 +844,13 @@ Geheimnis/keine Antwort/Rückfragen mit Ziel; Repeater-Gerät mit Auswahl aus Ad
 erreichbar, feste Messwerte ohne Abfrage, Abstand-Untergrenze, doppelt/ungültig abgelehnt, Bearbeiten).
 **Nicht getestet:** echte Funkstrecke (Mock simuliert den Repeater) – HW-Testplan §13.
 
+**Nachtrag 2026-10-17 (HW-Test):** Die Zielliste kannte nur Repeater aus Adverts. Auf dem Gerät zeigte
+`neighbors` den Nachbarn aus der Nachbarsuche nach dem Start, die Liste blieb leer – Repeater senden Adverts oft
+nur alle paar Stunden. Jetzt trägt auch die Antwort auf die Nachbarsuche (`onControlDataRecv`, voller Schlüssel,
+kein Name) den Repeater ein: Hops 0, Name vorläufig der Schlüssel-Anfang wie bei `neighbors`, das nächste Advert
+setzt den echten Namen; ein bekannter Name wird nicht überschrieben. Den Tag der Suche prüft MyMesh (privat), ein
+unverlangter Eintrag füllt nur die Auswahl – Zugriff braucht weiter ein Passwort.
+
 ## E43 – Kanal-API mit API-Schlüssel (2026-10-16, User: „Api über die eine abfrage aller auf dem Gerät angelegten Kanäle möglich ist, zugriff über einen Api key der auf dem gerät generiert wird … home-central kanäle quasi aboniert und alle nachrichten in einem kanal dann per telegram weiterleiten kann. Das muss noch in die 0.10.0“), 0.10.0
 
 - **Nur lesend**, eigener Zugang statt Admin-Login: home-central braucht weder das Admin-Passwort (das alles darf)

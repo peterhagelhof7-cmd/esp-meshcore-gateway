@@ -38,6 +38,7 @@ protected:
   // an MyMesh weitergereicht (minus Anzahl der Sitzungs-Treffer).
   void onAdvertRecv(mesh::Packet* packet, const mesh::Identity& id, uint32_t timestamp,
                     const uint8_t* app_data, size_t app_data_len) override;
+  void onControlDataRecv(mesh::Packet* packet) override;
   int searchPeersByHash(const uint8_t* hash) override;
   void getPeerSharedSecret(uint8_t* dest_secret, int peer_idx) override;
   void onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_idx, const uint8_t* secret,

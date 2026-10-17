@@ -500,8 +500,14 @@ void remote::onAdvert(const uint8_t* key, const char* name, uint8_t type, uint8_
     }
   }
   Known& k = S->known[slot];
+  bool same = k.heardMs && !memcmp(k.key, key, 32);
   memcpy(k.key, key, 32);
-  strlcpy(k.name, name && *name ? name : "?", sizeof(k.name));
+  if (name && *name) {
+    strlcpy(k.name, name, sizeof(k.name));
+  } else if (!same) {
+    // ohne Namen (Nachbarsuche): Schlüssel-Anfang wie bei "neighbors"
+    snprintf(k.name, sizeof(k.name), "%02X%02X%02X%02X", key[0], key[1], key[2], key[3]);
+  }   // sonst bleibt der Name aus dem letzten Advert
   k.type = type;
   k.hops = hops;
   k.snr = snr;
