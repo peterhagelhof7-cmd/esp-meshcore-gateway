@@ -119,7 +119,7 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 - [x] Abmelden → Konsole wieder lokal (`ver` zeigt Gateway-Version)
 - [x] Überwachung: Repeater (per Funk) mit Gast-Passwort → nach ≤ 1 min Akku/Temperatur/Laufzeit/Rauschen; Werte mit App vergleichen
 - [x] Regel „Akku über (aktueller Wert − 0,5 V)“ → Meldung im Alarmkanal sofort nach Speichern; Regel wieder löschen
-- [ ] Ziel-Repeater ausschalten → nach Fehlversuchen „nicht erreichbar“ (Dauer notieren); einschalten → „wieder erreichbar“
+- [-] (übersprungen: Ziel nicht abschaltbar) Ziel-Repeater ausschalten → nach Fehlversuchen „nicht erreichbar“ (Dauer notieren); einschalten → „wieder erreichbar“
 - [x] Ziel-Repeater neu starten → nächste Abfrage meldet sich neu an (Status kommt), Laufzeit klein
 - [x] Paket-Log: je Abfrage nur die erwarteten Pakete (ANON_REQ nur bei Neuanmeldung, REQ ×2)
 - [ ] 24 h laufen lassen: Heap/PSRAM stabil, keine Abstürze
@@ -134,7 +134,7 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
   sein Advert danach ersetzte den vorläufigen Namen A1B2C3D4 durch DE-XX-ORT01.
   `get prv.key`: v1.17.1 kennt den Befehl nicht („??: prv.key“), Antwort trotzdem nur in der Konsole (Filter
   nach Befehl), im Ereignis-Log nur Befehl + Hinweis.
-  Offen: Aus-/Einschalten, 24 h.
+  Aus-/Einschalten übersprungen (Repeater nicht abschaltbar; Ablauf im UI-Test mit Mock abgedeckt). Offen: 24 h.
 
 ## 14. Kanal-API (E43, 0.10.0)
 - [ ] System → Kanal-API: „Schlüssel erzeugen“ → eingeschaltet, Schlüssel anzeigen/verbergen
