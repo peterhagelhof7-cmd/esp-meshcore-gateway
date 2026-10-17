@@ -120,7 +120,7 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 - [x] Überwachung: Repeater (per Funk) mit Gast-Passwort → nach ≤ 1 min Akku/Temperatur/Laufzeit/Rauschen; Werte mit App vergleichen
 - [x] Regel „Akku über (aktueller Wert − 0,5 V)“ → Meldung im Alarmkanal sofort nach Speichern; Regel wieder löschen
 - [ ] Ziel-Repeater ausschalten → nach Fehlversuchen „nicht erreichbar“ (Dauer notieren); einschalten → „wieder erreichbar“
-- [ ] Ziel-Repeater neu starten → nächste Abfrage meldet sich neu an (Status kommt), Laufzeit klein
+- [x] Ziel-Repeater neu starten → nächste Abfrage meldet sich neu an (Status kommt), Laufzeit klein
 - [x] Paket-Log: je Abfrage nur die erwarteten Pakete (ANON_REQ nur bei Neuanmeldung, REQ ×2)
 - [ ] 24 h laufen lassen: Heap/PSRAM stabil, keine Abstürze
 
@@ -130,7 +130,9 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
   sender_timestamp == 0), kein Gateway-Fehler. Gast: Repeater hat kein Gast-Passwort → entfällt. Überwachung: erste
   Werte 4 s nach Speichern (4,09 V, 9,2 °C, −115 dBm, direkt 3,1 s); bestehende Sitzung → kein ANON_REQ, nur REQ
   Status (Antwort per PATH) + REQ Telemetrie (RESPONSE). Regel Akku > 3,59 V → Alarm sofort, Regel gelöscht.
-  Offen: `get prv.key` (User), Aus-/Einschalten, Neustart, 24 h.
+  Neustart des Ziels: nächste Abfrage ohne Neuanmeldung (Repeater speichert die ACL im Flash), Laufzeit 0,05 h;
+  sein Advert danach ersetzte den vorläufigen Namen A1B2C3D4 durch DE-XX-ORT01.
+  Offen: `get prv.key` (User), Aus-/Einschalten, 24 h.
 
 ## 14. Kanal-API (E43, 0.10.0)
 - [ ] System → Kanal-API: „Schlüssel erzeugen“ → eingeschaltet, Schlüssel anzeigen/verbergen
