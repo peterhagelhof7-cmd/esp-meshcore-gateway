@@ -114,7 +114,7 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 - [x] Anmeldung mit falschem Passwort → nach ≤ 45 s „keine Antwort (Passwort falsch …)“
 - [x] Anmeldung mit Admin-Passwort → „angemeldet als Admin“ (Flood/direkt, Zeit notieren)
 - [x] `ver`, `get radio`, `neighbors`, `stats-core` → Antworten mit `[Name]`, Laufzeit je Befehl notieren; zweiter Befehl geht direkt (Pfad gelernt)
-- [ ] `get prv.key` → Antwort nur in der Konsole, nicht im Ereignis-Log
+- [x] `get prv.key` → Antwort nur in der Konsole, nicht im Ereignis-Log
 - [ ] Gast-Anmeldung → CLI-Befehl abgelehnt mit Hinweis
 - [x] Abmelden → Konsole wieder lokal (`ver` zeigt Gateway-Version)
 - [x] Überwachung: Repeater (per Funk) mit Gast-Passwort → nach ≤ 1 min Akku/Temperatur/Laufzeit/Rauschen; Werte mit App vergleichen
@@ -132,7 +132,9 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
   Status (Antwort per PATH) + REQ Telemetrie (RESPONSE). Regel Akku > 3,59 V → Alarm sofort, Regel gelöscht.
   Neustart des Ziels: nächste Abfrage ohne Neuanmeldung (Repeater speichert die ACL im Flash), Laufzeit 0,05 h;
   sein Advert danach ersetzte den vorläufigen Namen A1B2C3D4 durch DE-XX-ORT01.
-  Offen: `get prv.key` (User), Aus-/Einschalten, 24 h.
+  `get prv.key`: v1.17.1 kennt den Befehl nicht („??: prv.key“), Antwort trotzdem nur in der Konsole (Filter
+  nach Befehl), im Ereignis-Log nur Befehl + Hinweis.
+  Offen: Aus-/Einschalten, 24 h.
 
 ## 14. Kanal-API (E43, 0.10.0)
 - [ ] System → Kanal-API: „Schlüssel erzeugen“ → eingeschaltet, Schlüssel anzeigen/verbergen
