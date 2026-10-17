@@ -110,19 +110,27 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
 - [ ] Modus „eigener Zabbix-Kanal“: Alarmkanal ohne Kennung, Zabbix-Kanal mit; Empfänger-Kanalfilter auf Zabbix-Kanal
 
 ## 13. Fernkonsole und entfernte Repeater (E42, 0.10.0) – braucht einen zweiten Repeater mit bekanntem Passwort
-- [ ] Konsole → Zielliste zeigt Repeater aus Adverts (z. B. Nachbar A1B2C3D4) mit Hops und Alter
-- [ ] Anmeldung mit falschem Passwort → nach ≤ 45 s „keine Antwort (Passwort falsch …)“
-- [ ] Anmeldung mit Admin-Passwort → „angemeldet als Admin“ (Flood/direkt, Zeit notieren)
-- [ ] `ver`, `get radio`, `neighbors`, `stats-core` → Antworten mit `[Name]`, Laufzeit je Befehl notieren; zweiter Befehl geht direkt (Pfad gelernt)
+- [x] Konsole → Zielliste zeigt Repeater aus Adverts (z. B. Nachbar A1B2C3D4) mit Hops und Alter
+- [x] Anmeldung mit falschem Passwort → nach ≤ 45 s „keine Antwort (Passwort falsch …)“
+- [x] Anmeldung mit Admin-Passwort → „angemeldet als Admin“ (Flood/direkt, Zeit notieren)
+- [x] `ver`, `get radio`, `neighbors`, `stats-core` → Antworten mit `[Name]`, Laufzeit je Befehl notieren; zweiter Befehl geht direkt (Pfad gelernt)
 - [ ] `get prv.key` → Antwort nur in der Konsole, nicht im Ereignis-Log
 - [ ] Gast-Anmeldung → CLI-Befehl abgelehnt mit Hinweis
-- [ ] Abmelden → Konsole wieder lokal (`ver` zeigt Gateway-Version)
-- [ ] Überwachung: Repeater (per Funk) mit Gast-Passwort → nach ≤ 1 min Akku/Temperatur/Laufzeit/Rauschen; Werte mit App vergleichen
-- [ ] Regel „Akku über (aktueller Wert − 0,5 V)“ → Meldung im Alarmkanal sofort nach Speichern; Regel wieder löschen
+- [x] Abmelden → Konsole wieder lokal (`ver` zeigt Gateway-Version)
+- [x] Überwachung: Repeater (per Funk) mit Gast-Passwort → nach ≤ 1 min Akku/Temperatur/Laufzeit/Rauschen; Werte mit App vergleichen
+- [x] Regel „Akku über (aktueller Wert − 0,5 V)“ → Meldung im Alarmkanal sofort nach Speichern; Regel wieder löschen
 - [ ] Ziel-Repeater ausschalten → nach Fehlversuchen „nicht erreichbar“ (Dauer notieren); einschalten → „wieder erreichbar“
 - [ ] Ziel-Repeater neu starten → nächste Abfrage meldet sich neu an (Status kommt), Laufzeit klein
-- [ ] Paket-Log: je Abfrage nur die erwarteten Pakete (ANON_REQ nur bei Neuanmeldung, REQ ×2)
+- [x] Paket-Log: je Abfrage nur die erwarteten Pakete (ANON_REQ nur bei Neuanmeldung, REQ ×2)
 - [ ] 24 h laufen lassen: Heap/PSRAM stabil, keine Abstürze
+
+- Ergebnis 2026-10-17 (SenseCap Solar A1B2C3D4, v1.17.1, 0 Hops, SNR 13): Zielliste erst nach Fix (Nachbarsuche,
+  fbacdce); falsches Passwort → „keine Antwort“ nach 24 s; Admin-Login Flood 1,4 s, danach direkt 1,4 s; `board`/`ver`/
+  `get radio` je 1–2 s. `stats-core`/`stats-radio` → „Unknown command“: in MeshCore nur seriell (CommonCLI,
+  sender_timestamp == 0), kein Gateway-Fehler. Gast: Repeater hat kein Gast-Passwort → entfällt. Überwachung: erste
+  Werte 4 s nach Speichern (4,09 V, 9,2 °C, −115 dBm, direkt 3,1 s); bestehende Sitzung → kein ANON_REQ, nur REQ
+  Status (Antwort per PATH) + REQ Telemetrie (RESPONSE). Regel Akku > 3,59 V → Alarm sofort, Regel gelöscht.
+  Offen: `get prv.key` (User), Aus-/Einschalten, Neustart, 24 h.
 
 ## 14. Kanal-API (E43, 0.10.0)
 - [ ] System → Kanal-API: „Schlüssel erzeugen“ → eingeschaltet, Schlüssel anzeigen/verbergen
