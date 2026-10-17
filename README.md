@@ -4,8 +4,8 @@ MeshCore-Repeater mit WLAN: Weboberfläche für alle MeshCore-Einstellungen, Web
 offizielle CLI, Kanäle senden und empfangen, Grenzwert-Meldungen von Sensormetern und Ping-Zielen
 in MeshCore-Kanäle, Firmware-Update per Web mit Board-Prüfung und Rollback.
 
-Bewährte Version: **0.8.0**, neu und in Erprobung: **0.9.0** (beide auf Basis von MeshCore **repeater-v1.18.0**),
-für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind beide wählbar.
+Aktuelle bewährte Version: **0.9.0** (auf Basis von MeshCore **repeater-v1.18.0**),
+für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind auch ältere Versionen wählbar.
 
 ## Funktionen
 
@@ -31,7 +31,7 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind beide wählbar.
 - WLAN-Einrichtung über Hotspot, Hostname folgt dem Gerätenamen, NTP-Zeit
 - Statusseiten auf dem OLED-Display, Sicherung und Wiederherstellung der Einstellungen
 
-## Neu in 0.9.0 (in Erprobung, im Web-Flasher wählbar)
+## Neu in 0.9.0
 
 - **Alarme „aktiv bis bestätigt“:** Wichtige Meldungen bekommen eine Nummer (`[ACK 3] …`) und werden
   nach 5, 15 und 30 Minuten wiederholt, bis jemand im Kanal mit `ACK 3` antwortet oder in der
@@ -43,15 +43,17 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind beide wählbar.
   schließen sich automatisch, die Annahme wird per ACK im Kanal bestätigt. Vorlage für Zabbix 7 liegt bei.
 - **Speicheranzeige:** freier Heap mit Tiefststand seit dem Start und PSRAM-Belegung im Status.
 
-## In Entwicklung (0.10.0)
+## Demnächst: 0.10.0
 
-- **Fernkonsole:** andere Repeater im Mesh per CLI verwalten, direkt im Konsolen-Tab. Ziel aus empfangenen
-  Adverts wählen, mit dem Admin-Passwort anmelden, Befehle gehen per Funk.
+Fertig gebaut und im 24-Stunden-Testlauf auf echter Hardware, danach im Web-Flasher wählbar.
+
+- **Fernkonsole:** andere Repeater im Mesh per CLI verwalten, direkt im Konsolen-Tab. Ziel aus der Nachbarsuche
+  und empfangenen Adverts wählen, mit dem Admin-Passwort anmelden, Befehle gehen per Funk.
 - **Entfernte Repeater überwachen:** Akku, Temperatur, Laufzeit und Rauschen anderer Repeater regelmäßig per Funk
   abfragen (Gast-Passwort genügt). Grenzwerte, Neustart-Erkennung und „nicht erreichbar“ melden in den Alarmkanal.
-- **Kanal-API:** Kanäle und Nachrichten für andere Systeme im LAN abrufbar (nur lesend, API-Schlüssel wird auf dem
-  Gerät erzeugt), z. B. zum Weiterleiten eines Kanals nach Telegram. Optional Senden in einen freigegebenen Kanal,
-  etwa für Unwetter- und Katastrophenwarnungen (DWD, NINA/KATWARN) aus home-central.
+- **Kanal-API:** Kanäle und Nachrichten für andere Systeme im LAN abrufbar, geschützt mit einem API-Schlüssel, der
+  auf dem Gerät erzeugt wird – z. B. zum Weiterleiten eines Kanals nach Telegram. Optional Senden in einen
+  freigegebenen Kanal (max. 10 pro Stunde), etwa für Unwetter- und Katastrophenwarnungen (DWD, NINA/KATWARN).
 
 ## Installieren
 
