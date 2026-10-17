@@ -137,10 +137,14 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
   Aus-/Einschalten übersprungen (Repeater nicht abschaltbar; Ablauf im UI-Test mit Mock abgedeckt). Offen: 24 h.
 
 ## 14. Kanal-API (E43, 0.10.0)
-- [ ] System → Kanal-API: „Schlüssel erzeugen“ → eingeschaltet, Schlüssel anzeigen/verbergen
-- [ ] `curl -H "X-API-Key: <Schlüssel>" http://<gateway>/api/v1/channels` → alle Kanäle, keine Kanalschlüssel
+- [x] System → Kanal-API: „Schlüssel erzeugen“ → eingeschaltet, Schlüssel anzeigen/verbergen
+- [x] `curl -H "X-API-Key: <Schlüssel>" http://<gateway>/api/v1/channels` → alle Kanäle, keine Kanalschlüssel
 - [ ] `…/api/v1/messages?since=0` → Nachrichten mit Absender/Text; Testnachricht aus der App erscheint mit `dir: rx`, Gateway-Alarm mit `dir: tx`
 - [ ] Ohne/mit falschem Schlüssel → 401; „Ausschalten“ → 403
 - [ ] Gateway neu starten → `boot` ändert sich
-- [ ] Schlüssel steht nicht im Ereignis-Log
+- [x] Schlüssel steht nicht im Ereignis-Log
 - [ ] E44: „Senden erlauben in“ Testkanal → `curl -H "X-API-Key: …" -d channel=<Kanal> -d "text=Test äöü ⚠" http://<gateway>/api/v1/send` → Nachricht in der App mit Umlauten/Emoji; anderer Kanal → 403; 11. Nachricht in der Stunde → 429
+- Ergebnis 2026-10-17: 4 Kanäle mit Art/Scope, keine Schlüssel; ohne/falscher Schlüssel 401, Bearer 200;
+  `messages?since=0` → Gateway-Sendungen und Alarm mit `dir: tx`; Senden in Public (nicht frei) 403, in haus-alarm 200
+  „API-Test äöüß ⚠ 📡“ unverändert zurück und im Log als „API … von 10.10.0.182“; Schlüssel nicht im Log.
+  Offen: App-Nachricht als `dir: rx`, Ausschalten → 403, `boot` nach Neustart, 429.
