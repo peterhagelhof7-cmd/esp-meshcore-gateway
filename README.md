@@ -4,8 +4,8 @@ MeshCore-Repeater mit WLAN: Weboberfläche für alle MeshCore-Einstellungen, Web
 offizielle CLI, Kanäle senden und empfangen, Grenzwert-Meldungen von Sensormetern und Ping-Zielen
 in MeshCore-Kanäle, Firmware-Update per Web mit Board-Prüfung und Rollback.
 
-Aktuelle bewährte Version: **0.9.0** (auf Basis von MeshCore **repeater-v1.18.0**),
-für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind auch ältere Versionen wählbar.
+Bewährte Version: **0.9.0**, neu und in Erprobung: **0.10.0** (beide auf Basis von MeshCore **repeater-v1.18.0**),
+für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind beide und ältere Versionen wählbar.
 
 ## Funktionen
 
@@ -43,9 +43,9 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind auch ältere Versione
   schließen sich automatisch, die Annahme wird per ACK im Kanal bestätigt. Vorlage für Zabbix 7 liegt bei.
 - **Speicheranzeige:** freier Heap mit Tiefststand seit dem Start und PSRAM-Belegung im Status.
 
-## Demnächst: 0.10.0
+## Neu in 0.10.0 (in Erprobung, im Web-Flasher wählbar)
 
-Fertig gebaut und im 24-Stunden-Testlauf auf echter Hardware, danach im Web-Flasher wählbar.
+24-Stunden-Testlauf auf echter Hardware bestanden.
 
 - **Fernkonsole:** andere Repeater im Mesh per CLI verwalten, direkt im Konsolen-Tab. Ziel aus der Nachbarsuche
   und empfangenen Adverts wählen, mit dem Admin-Passwort anmelden, Befehle gehen per Funk.
