@@ -326,10 +326,10 @@ und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.
 
 - **Laufendes Gateway: System → Firmware-Update**, die `firmware.bin` für dein Board hochladen und
   „Hochladen & installieren“. Alle Einstellungen bleiben. Aktuelle Dateien:
-  - neu, in Erprobung 0.10.0 (MeshCore 1.18.0):
+  - bewährt 0.10.0 (MeshCore 1.18.0):
     [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.0/v4/firmware.bin) ·
     [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.0/r8/firmware.bin)
-  - bewährt 0.9.0 (MeshCore 1.18.0):
+  - ältere bewährte Version 0.9.0 (MeshCore 1.18.0):
     [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.9.0/v4/firmware.bin) ·
     [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.9.0/r8/firmware.bin)
   - ältere bewährte Version 0.8.0 (MeshCore 1.18.0):
