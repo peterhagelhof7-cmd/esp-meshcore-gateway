@@ -53,6 +53,19 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind auch ältere Versione
   auf dem Gerät erzeugt wird – z. B. zum Weiterleiten eines Kanals nach Telegram. Optional Senden in einen
   freigegebenen Kanal (max. 10 pro Stunde), etwa für Unwetter- und Katastrophenwarnungen (DWD, NINA/KATWARN).
 
+## Bekannte Probleme
+
+Stand 0.10.0, Behebung ist für den nächsten Firmware-Build vorgemerkt.
+
+- **Empfehlung meldet auf V4.2 dauerhaft eine Abweichung bei `radio.fem.rxgain`.** Den FEM-Empfangsverstärker
+  gibt es nur auf Boards mit KCT8103L (V4.3). Auf V4.2 (GC1109) antwortet MeshCore mit `Error: unsupported`,
+  die Empfehlung zeigt das als Abweichung, „Abweichungen übernehmen“ schlägt für diesen Eintrag fehl.
+  Funk und alle anderen Einstellungen sind nicht betroffen, die Meldung kann ignoriert werden.
+  Welche Revision vorliegt, zeigt der Konsolenbefehl `board` („Heltec V4.3 OLED“ bzw. „Heltec V4 OLED“).
+- **Feld „FEM-Sendeverstärker“ (`radio.fem.txgain`) ohne Wirkung.** MeshCore repeater-v1.18.0 speichert den
+  Wert, die Board-Unterstützung für V4/V4.3 wertet ihn aber nicht aus – auf keiner Revision. Der Hinweis
+  „nur bei Board-Revision mit KCT8103L“ in den Einstellungen ist irreführend.
+
 ## Installieren
 
 **Admin-Handbuch** (Installation, Erstinbetriebnahme, **Regionen**, Betrieb, Updates): [`docs/admin-guide.md`](docs/admin-guide.md)

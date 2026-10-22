@@ -136,6 +136,18 @@ Flashen auf Hardware nur nach Ansage.
   gleiche Speicherlogik wie `handleWifiSave` (wifiPendingTest, Neustart), Passwort in Konsole/Web-Log/
   Ereignis-Log maskieren (`isSecretCommand`). Zweck: Ersteinrichtung ohne Installer-AP und Rettung,
   wenn das gespeicherte WLAN nicht mehr erreichbar ist.
+- **Profil: `radio.fem.rxgain` auf V4.2** (README „Bekannte Probleme“, 2026-10-22): `get radio.fem.rxgain`
+  liefert auf GC1109-Boards (V4.2) `Error: unsupported` → Empfehlung zeigt dauerhaft ✗, Übernehmen scheitert.
+  Fix in `loadProfile()` (`src/web/index_html.h`): Antwort `Error: unsupported` als „nicht zutreffend“ werten
+  (Zelle leer/„–“ mit Hinweis „Board ohne FEM-LNA (V4.2)“, nicht in `profDiff`). Zusätzlich Hinweistext in
+  `src/Profile.cpp` korrigieren („1.17.1 auf V4“ → V4.3: LNA hebt Signal und Rauschen gleich, kein SNR-Gewinn;
+  A/B-Test auf V4.3-Testgerät am 2026-10-22: NF −108 → −87 dBm, RSSI −72 → −52 dBm, SNR 12,1 dB unverändert).
+  Mock in `tools/webui-test` um eine V4.2-Antwort ergänzen.
+- **Einstellungen: `radio.fem.txgain` entfernen** (README „Bekannte Probleme“, 2026-10-22): In repeater-v1.18.0
+  nur gespeichert, von `HeltecV4Board`/`LoRaFEMControl` nicht ausgewertet. Feld in der Settings-Liste
+  (`src/web/index_html.h`, Eintrag `radio.fem.txgain`) und in der Konsolen-Autovervollständigung streichen;
+  wieder aufnehmen, sobald Upstream es für die V4.3 umsetzt (beim nächsten MeshCore-Update prüfen).
+- Nach dem Fix: README „Bekannte Probleme“ und Admin-Guide §8 bereinigen.
 
 ## Hardware-Stand
 

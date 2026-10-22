@@ -358,6 +358,7 @@ und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.
 | Keine Nachbarn | „Jetzt suchen“; Antenne/Standort prüfen; Liste ist nach jedem Neustart erst leer |
 | Nachrichten mit Region kommen nicht durch | Regionen prüfen ([Abschnitt 5](#5-regionen-richtig-einrichten)), `region save` vergessen? |
 | Rauschpegel sehr hoch (≈ −85 dBm) | Einstellungen → Empfehlung: `radio.rxgain`/`radio.fem.rxgain` = off |
+| Empfehlung: `radio.fem.rxgain` dauerhaft ✗, Übernehmen scheitert | Bekanntes Problem auf V4.2-Boards (kein schaltbarer FEM-Verstärker, `Error: unsupported`), ignorieren – siehe README „Bekannte Probleme“ |
 | Meldungen kommen nicht an | Kanal in der App vorhanden? Scope passend? Überwachung → Regel → Test |
 
 Das **Ereignis-Log** (System) hält Starts, Startgrund, WLAN-Wechsel, Befehle (Passwörter maskiert), Meldungen,
