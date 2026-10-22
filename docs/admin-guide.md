@@ -1,6 +1,6 @@
 # Admin-Handbuch: MeshCore-Gateway
 
-Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.10.0, MeshCore 1.18.0.
+Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.10.1, MeshCore 1.18.0.
 
 **Inhalt**
 
@@ -326,6 +326,9 @@ und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.
 
 - **Laufendes Gateway: System → Firmware-Update**, die `firmware.bin` für dein Board hochladen und
   „Hochladen & installieren“. Alle Einstellungen bleiben. Aktuelle Dateien:
+  - in Erprobung 0.10.1 (MeshCore 1.18.0):
+    [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.1/v4/firmware.bin) ·
+    [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.1/r8/firmware.bin)
   - bewährt 0.10.0 (MeshCore 1.18.0):
     [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.0/v4/firmware.bin) ·
     [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.0/r8/firmware.bin)
@@ -358,7 +361,7 @@ und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.
 | Keine Nachbarn | „Jetzt suchen“; Antenne/Standort prüfen; Liste ist nach jedem Neustart erst leer |
 | Nachrichten mit Region kommen nicht durch | Regionen prüfen ([Abschnitt 5](#5-regionen-richtig-einrichten)), `region save` vergessen? |
 | Rauschpegel sehr hoch (≈ −85 dBm) | Einstellungen → Empfehlung: `radio.rxgain`/`radio.fem.rxgain` = off |
-| Empfehlung: `radio.fem.rxgain` dauerhaft ✗, Übernehmen scheitert | Bekanntes Problem auf V4.2-Boards (kein schaltbarer FEM-Verstärker, `Error: unsupported`), ignorieren – siehe README „Bekannte Probleme“ |
+| Empfehlung: `radio.fem.rxgain` dauerhaft ✗, Übernehmen scheitert | Bekanntes Problem in 0.10.0 auf V4.2-Boards (kein schaltbarer FEM-Verstärker, `Error: unsupported`), ignorieren oder auf 0.10.1 aktualisieren |
 | Meldungen kommen nicht an | Kanal in der App vorhanden? Scope passend? Überwachung → Regel → Test |
 
 Das **Ereignis-Log** (System) hält Starts, Startgrund, WLAN-Wechsel, Befehle (Passwörter maskiert), Meldungen,

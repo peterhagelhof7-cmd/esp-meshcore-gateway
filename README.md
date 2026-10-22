@@ -53,9 +53,15 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind auch ältere Versione
   auf dem Gerät erzeugt wird – z. B. zum Weiterleiten eines Kanals nach Telegram. Optional Senden in einen
   freigegebenen Kanal (max. 10 pro Stunde), etwa für Unwetter- und Katastrophenwarnungen (DWD, NINA/KATWARN).
 
+## Neu in 0.10.1 (in Erprobung)
+
+- **Heltec V4.3 (FEM KCT8103L) und V4.2 (GC1109):** Die Empfehlung wertet `radio.fem.rxgain` auf V4.2 als
+  „nicht vorhanden“ statt als Abweichung. Das wirkungslose Feld „FEM-Sendeverstärker“ ist entfernt. Hinweis zum
+  FEM-Empfangsverstärker nach Messung auf V4.3: Er hebt Signal und Rauschen gleich (kein SNR-Gewinn), daher aus.
+
 ## Bekannte Probleme
 
-Stand 0.10.0. Beide Punkte sind im Quellcode behoben und kommen mit der nächsten Firmware-Version.
+Betrifft 0.10.0, behoben in 0.10.1.
 
 - **Empfehlung meldet auf V4.2 dauerhaft eine Abweichung bei `radio.fem.rxgain`.** Den FEM-Empfangsverstärker
   gibt es nur auf Boards mit KCT8103L (V4.3). Auf V4.2 (GC1109) antwortet MeshCore mit `Error: unsupported`,
