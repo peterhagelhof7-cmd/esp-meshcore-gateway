@@ -98,6 +98,7 @@ class FakeCli:
                   'password': 'password'}
         self.regions = []   # [name, parent, flood, home]
         self.key = 'ab' * 64
+        self.fem_lna = True   # V4.3 (KCT8103L); False = V4.2, radio.fem.rxgain -> "Error: unsupported"
         self.acl = {'c0ffee' + '11' * 29: 3}   # ein Admin-Client
 
     def region_tree(self):
@@ -126,7 +127,7 @@ class FakeCli:
         if k == 'dutycycle': return '> %.1f%%' % (100.0 / (p['af'] + 1))
         if k == 'agc.reset.interval': return '> %d' % (p['agc'] * 4)
         if k == 'advert.interval': return '> %d' % (p['advert.interval'] * 2)
-        if k == 'radio.fem.txgain': return 'Error: unsupported'
+        if k == 'radio.fem.rxgain' and not self.fem_lna: return 'Error: unsupported'
         if k == 'prv.key': return '> ' + self.key
         if k in ('txdelay', 'direct.txdelay', 'rxdelay'): return '> ' + ftoa32(p[k])
         if k in ('lat', 'lon'): return '> ' + ftoa(p[k])
@@ -158,8 +159,8 @@ class FakeCli:
                 if (0 < h < 3) or h > 168: return 'Error: interval range is 3-168 hours'
                 p[k] = h
                 return 'OK'
-            if k == 'radio.fem.txgain': return 'Error: unsupported'
             if k == 'radio.fem.rxgain':
+                if not self.fem_lna: return 'Error: unsupported'
                 p[k] = v
                 return 'OK - LoRa FEM RX gain ' + v
             if k == 'name':
@@ -1121,6 +1122,10 @@ class H(BaseHTTPRequestHandler):
         if u.path == '/api/zbx/test':
             with lock:
                 zbxm.test()
+            return self.send_json({'ok': True})
+        if u.path == '/api/mock/board':   # nur Mock: Board-Revision umschalten (v42 = ohne FEM-LNA)
+            with lock:
+                cli.fem_lna = form.get('rev', ['v43'])[0] != 'v42'
             return self.send_json({'ok': True})
         if u.path == '/api/mock/ackrepeat':   # nur Mock: alle offenen um eine Wiederholung weiter
             with lock:

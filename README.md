@@ -55,7 +55,7 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind auch ältere Versione
 
 ## Bekannte Probleme
 
-Stand 0.10.0, Behebung ist für den nächsten Firmware-Build vorgemerkt.
+Stand 0.10.0. Beide Punkte sind im Quellcode behoben und kommen mit der nächsten Firmware-Version.
 
 - **Empfehlung meldet auf V4.2 dauerhaft eine Abweichung bei `radio.fem.rxgain`.** Den FEM-Empfangsverstärker
   gibt es nur auf Boards mit KCT8103L (V4.3). Auf V4.2 (GC1109) antwortet MeshCore mit `Error: unsupported`,

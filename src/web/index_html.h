@@ -54,6 +54,7 @@ button:disabled{opacity:.5;cursor:default}
 .form .fld small{color:var(--muted);font-size:12px}
 .form .fld.chg input,.form .fld.chg select{border-color:var(--warn);box-shadow:0 0 0 1px var(--warn)}
 .form .fld.na{opacity:.55}
+tr.na td{opacity:.55}
 .radio4{display:grid;grid-template-columns:2fr 1.3fr 1fr 1fr;gap:6px}
 .grp{grid-column:1/-1;margin:14px 0 2px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:4px}
 .grp:first-child{margin-top:0}
@@ -599,12 +600,12 @@ const CMDS=['ver','board','clock','clock sync','time ','advert','advert.zerohop'
 'get name','get radio','get freq','get tx','get repeat','get lat','get lon','get advert.interval','get flood.advert.interval',
 'get flood.max','get flood.max.unscoped','get flood.max.advert','get af','get dutycycle','get rxdelay','get txdelay','get direct.txdelay',
 'get int.thresh','get agc.reset.interval','get multi.acks','get allow.read.only','get guest.password','get owner.info','get path.hash.mode',
-'get loop.detect','get cad','get radio.rxgain','get radio.fem.rxgain','get radio.fem.txgain','get adc.multiplier','get prv.key',
+'get loop.detect','get cad','get radio.rxgain','get radio.fem.rxgain','get adc.multiplier','get prv.key',
 'get bridge.enabled','get bridge.delay','get bridge.source','get bridge.baud','get bridge.channel','get bridge.secret',
 'set name ','set radio ','set freq ','set tx ','set repeat ','set lat ','set lon ','set advert.interval ','set flood.advert.interval ',
 'set flood.max ','set flood.max.unscoped ','set flood.max.advert ','set af ','set dutycycle ','set rxdelay ','set txdelay ','set direct.txdelay ',
 'set int.thresh ','set agc.reset.interval ','set multi.acks ','set allow.read.only ','set guest.password ','set owner.info ','set path.hash.mode ',
-'set loop.detect ','set cad ','set radio.rxgain ','set radio.fem.rxgain ','set radio.fem.txgain ','set adc.multiplier ','set prv.key ',
+'set loop.detect ','set cad ','set radio.rxgain ','set radio.fem.rxgain ','set adc.multiplier ','set prv.key ',
 'region','region list ','region get ','region put ','region remove ','region allowf ','region denyf ','region home','region home ',
 'region default','region default ','region def ','region load','region save',
 'gps','gps on','gps off','gps sync','gps setloc','gps advert','gps advert ','sensor get ','sensor set ','erase','poweroff','shutdown'];
@@ -1343,8 +1344,7 @@ const F=[
  {k:'tx',l:'TX-Leistung am Chip',t:'num',min:1,max:22,step:1,u:'dBm',h:'Heltec V4 mit PA: 16 ≈ 467 mW, 17 ≈ 520 mW, 22 ≈ 800 mW am Ausgang. Grenze: 27 dBm ERP inkl. Antenne.'},
  {k:'dutycycle',l:'Duty Cycle',t:'num',min:1,max:100,step:0.1,u:'%',h:'gesetzlich 10 % pro Stunde'},
  {k:'radio.rxgain',l:'RX Boosted Gain',t:'sel',o:OO,h:'1.17.1 auf V4: aus (sonst Noise Floor ca. -84 dBm)'},
- {k:'radio.fem.rxgain',l:'FEM-Empfangsverstärker',t:'sel',o:OO,h:'1.17.1 auf V4: aus'},
- {k:'radio.fem.txgain',l:'FEM-Sendeverstärker',t:'sel',o:OO,h:'nur bei Board-Revision mit KCT8103L'},
+ {k:'radio.fem.rxgain',l:'FEM-Empfangsverstärker',t:'sel',o:OO,h:'nur V4.3 (KCT8103L): aus empfohlen, an hebt Signal und Rauschen gleich (kein SNR-Gewinn)'},
  {g:'Weiterleitung'},
  {k:'repeat',l:'Pakete weiterleiten',t:'sel',o:OO},
  {k:'flood.max',l:'Flood max. Hops (scoped)',t:'num',min:0,max:64,step:1},
@@ -1470,10 +1470,13 @@ async function loadProfile(){
     const tb=$('profBody');tb.innerHTML='';
     prof.entries.forEach(e=>{
       const tr=document.createElement('tr');
-      const ok=e.get?same(ist[e.cmd],e.expect):null;
+      // Board kennt die Einstellung nicht (z. B. radio.fem.rxgain auf V4.2): nicht zutreffend, keine Abweichung
+      const na=!!e.get&&/unsupported/i.test(val(ist[e.cmd]));
+      const ok=e.get&&!na?same(ist[e.cmd],e.expect):null;
       if(ok===false)profDiff.push(e.cmd);
-      const cells=[e.cmd,e.get?val(ist[e.cmd]):'',e.expect||'',ok===null?'':(ok?'✓':'✗'),e.why];
-      cells.forEach((c,i)=>{const td=document.createElement('td');td.textContent=c;if(i===0)td.className='mono';if(i===3){td.className='st '+(ok?'ok':'bad')}tr.appendChild(td)});
+      const cells=[e.cmd,na?'auf diesem Board nicht vorhanden':(e.get?val(ist[e.cmd]):''),e.expect||'',na?'–':(ok===null?'':(ok?'✓':'✗')),e.why];
+      cells.forEach((c,i)=>{const td=document.createElement('td');td.textContent=c;if(i===0)td.className='mono';if(i===3){td.className='st '+(na?'':(ok?'ok':'bad'))}tr.appendChild(td)});
+      if(na)tr.className='na';
       tb.appendChild(tr);
     });
     $('profApply').disabled=profDiff.length===0;

@@ -623,7 +623,8 @@ async function runCli(page, cmd) {
   check('Einst.: Profil-Tabelle ohne Regionen', rows === 19 && !(await text('#profBody')).includes('region'), rows + ' Zeilen');
   const crBefore = await page.$eval('#f_rc', e => e.value);
   check('Einst.: CR vorher 5 (Upstream-Default)', crBefore === '5', crBefore);
-  check('Einst.: fem.txgain als nicht verfügbar markiert', await page.$eval('#fb_radio\\.fem\\.txgain', e => e.classList.contains('na')));
+  check('Einst.: fem.txgain-Feld entfernt (in 1.18.0 ohne Wirkung)', !(await page.$('#fb_radio\\.fem\\.txgain')));
+  check('Einst.: fem.rxgain auf V4.3 verfügbar', !(await page.$eval('#fb_radio\\.fem\\.rxgain', e => e.classList.contains('na'))));
   check('Einst.: Regionen leer', await waitFor(async () => (await text('#regOut')).trim() === '* F'), await text('#regOut'));
   check('Einst.: Warnung „Keine Region angelegt“', await waitFor(async () => !(await page.$eval('#regWarn', e => e.hidden))));
   await page.screenshot({ path: out + '/05_settings_before.png', fullPage: true });
@@ -657,6 +658,17 @@ async function runCli(page, cmd) {
   check('Einst.: gespeichert', await waitFor(async () => (await text('#setMsg')) === 'Gespeichert'), await text('#setMsg'));
   check('Einst.: nur ein set-Befehl', (await text('#setOut')).trim().split('\n').length === 1, await text('#setOut'));
   check('Einst.: Profil meldet Abweichung', await waitFor(async () => (await text('#profMsg')) === '1 Abweichung(en)'), await text('#profMsg'));
+  // V4.2 (GC1109): radio.fem.rxgain -> "Error: unsupported" ist nicht zutreffend, keine zusätzliche Abweichung
+  const mockBoard = rev => page.evaluate(r => fetch('/api/mock/board', { method: 'POST', body: new URLSearchParams({ rev: r }) }), rev);
+  const femRow = () => page.$$eval('#profBody tr', rs => { const r = rs.find(x => x.cells[0].textContent.includes('fem.rxgain'));
+    return r ? { na: r.classList.contains('na'), ist: r.cells[1].textContent, st: r.cells[3].textContent } : null; });
+  await mockBoard('v42');
+  await page.click('#profReload');
+  check('Einst.: V4.2 – fem.rxgain nicht zutreffend', await waitFor(async () => { const r = await femRow(); return r && r.na && r.st === '–'; }), JSON.stringify(await femRow()));
+  check('Einst.: V4.2 – weiter nur 1 Abweichung', (await text('#profMsg')) === '1 Abweichung(en)', await text('#profMsg'));
+  await mockBoard('v43');
+  await page.click('#profReload');
+  check('Einst.: V4.3 – fem.rxgain wieder ✓', await waitFor(async () => { const r = await femRow(); return r && !r.na && r.st === '✓'; }), JSON.stringify(await femRow()));
   // Ungültiger Wert -> CLI lehnt ab, UI zeigt Fehler
   await page.$eval('#f_advert\\.interval', e => { e.value = '30'; e.dispatchEvent(new Event('input')); });
   await page.click('#setSave');

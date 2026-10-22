@@ -136,6 +136,8 @@ Flashen auf Hardware nur nach Ansage.
   gleiche Speicherlogik wie `handleWifiSave` (wifiPendingTest, Neustart), Passwort in Konsole/Web-Log/
   Ereignis-Log maskieren (`isSecretCommand`). Zweck: Ersteinrichtung ohne Installer-AP und Rettung,
   wenn das gespeicherte WLAN nicht mehr erreichbar ist.
+- ✅ **Umgesetzt 2026-10-22, noch nicht released** (Build V4 + R8 grün, UI-Test neue Checks grün; die 3 Ping-/Sensormeter-
+  FAILs kommen von der Platzhalter-IP 10.10.0.148 im Test und sind unabhängig davon):
 - **Profil: `radio.fem.rxgain` auf V4.2** (README „Bekannte Probleme“, 2026-10-22): `get radio.fem.rxgain`
   liefert auf GC1109-Boards (V4.2) `Error: unsupported` → Empfehlung zeigt dauerhaft ✗, Übernehmen scheitert.
   Fix in `loadProfile()` (`src/web/index_html.h`): Antwort `Error: unsupported` als „nicht zutreffend“ werten
@@ -147,7 +149,7 @@ Flashen auf Hardware nur nach Ansage.
   nur gespeichert, von `HeltecV4Board`/`LoRaFEMControl` nicht ausgewertet. Feld in der Settings-Liste
   (`src/web/index_html.h`, Eintrag `radio.fem.txgain`) und in der Konsolen-Autovervollständigung streichen;
   wieder aufnehmen, sobald Upstream es für die V4.3 umsetzt (beim nächsten MeshCore-Update prüfen).
-- Nach dem Fix: README „Bekannte Probleme“ und Admin-Guide §8 bereinigen.
+- Beim Release mit diesem Fix: README „Bekannte Probleme“ und Admin-Guide §8 bereinigen.
 
 ## Hardware-Stand
 

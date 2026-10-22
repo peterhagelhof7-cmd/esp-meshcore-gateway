@@ -32,7 +32,7 @@ const ProfileEntry profile::ENTRIES[] = {
   {"set agc.reset.interval 60", "get agc.reset.interval", "60", "Empfänger-Regelung regelmäßig zurücksetzen"},
   {"set multi.acks 1", "get multi.acks", "1", "zuverlässigere Zustellung"},
   {"set radio.rxgain off", "get radio.rxgain", "off", "1.17.1 auf V4: Vorverstärker hebt Noise Floor auf ca. -84 dBm"},
-  {"set radio.fem.rxgain off", "get radio.fem.rxgain", "off", "dito, FEM-LNA des V4"},
+  {"set radio.fem.rxgain off", "get radio.fem.rxgain", "off", "nur V4.3: FEM-LNA hebt Signal und Rauschen gleich, kein SNR-Gewinn (V4.2: entfällt)"},
 };
 
 const size_t profile::COUNT = sizeof(profile::ENTRIES) / sizeof(profile::ENTRIES[0]);
