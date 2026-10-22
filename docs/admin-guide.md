@@ -342,6 +342,10 @@ und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.
     [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.7.6/v4/firmware.bin) ·
     [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.7.6/r8/firmware.bin)
 
+  Dieselben Dateien hängen ab 0.10.1 auch an jedem
+  [GitHub-Release](https://github.com/peterhagelhof7-cmd/esp-meshcore-gateway/releases)
+  (`meshcore-gateway-heltec-v4-<Version>.bin` bzw. `…-v4-r8-<Version>.bin`, mit SHA-256).
+
   Welches Board du hast, zeigt der Web-Flasher bei „Verbinden & prüfen“.
   - Falsches Board und ältere Versionen werden abgelehnt („Downgrade erzwingen“ nur, wenn gewollt).
   - **Rollback:** Startet die neue Version nicht sauber (Absturz in der ersten Minute), kehrt das Gateway

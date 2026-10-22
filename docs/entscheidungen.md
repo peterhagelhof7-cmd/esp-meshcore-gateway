@@ -898,3 +898,19 @@ anderer Kanal → 403, falscher Schlüssel → 401, Freigabe in der Oberfläche,
 sicher, leer → 400, 10/h dann 429, Ereignis-Log, Freigabe zurücknehmen). home-central gegen den Mock: Warnung
 einmal im Mesh, Zeilen zusammengezogen, eigene Warnung nicht zurück nach Telegram, abgewählte Art nicht gesendet.
 **Nicht getestet:** auf echter Hardware.
+
+## E45 – GitHub-Release mit OTA-fähigen .bin bei jeder Version (2026-10-22, User: „ich wollte ein ota fähiges release, also ein .bin im github“, „die zukünftigen releases immer auch als OTA fähige bin pushen“), ab 0.10.1
+
+- Jede Version bekommt zusätzlich zu Tag und Web-Flasher ein **GitHub-Release** mit den App-Images beider Varianten:
+  `meshcore-gateway-heltec-v4-<Version>.bin` und `meshcore-gateway-heltec-v4-r8-<Version>.bin`.
+- `tools\github-release.ps1` nimmt genau die `firmware.bin` aus `docs/fw/<Version>/` (Flasher-Stand), prüft
+  Board-Merkmal + Version und SHA-256 gegen `manifest.json`, setzt die Notes aus „## Neu in <Version>“ der README
+  plus OTA-Anleitung, Board-Tabelle und SHA-256 zusammen. Status `test` = Pre-release, `stable` = normales Release.
+  Gibt es das Release schon, werden Dateien und Notes ersetzt.
+- Beim Promote (`flasher-update.ps1 -Promote`) auch `github-release.ps1 -Promote <Version>` (Pre-release weg, latest).
+- Nur App-Images (OTA, Adresse 0x10000), keine Bootloader-/Partitionsdateien: Neuinstallation läuft über den
+  Web-Flasher, der die Board-Prüfung macht.
+
+**Verifikation:** v0.10.1 per Skript neu erzeugt (Aktualisieren-Zweig): Dateien byte-gleich mit Flasher und live auf
+dem Testgerät, Notes mit korrekten Umlauten (Skript mit UTF-8-BOM wegen PowerShell 5.1). Anlegen-Zweig erst beim
+nächsten Release real getestet.

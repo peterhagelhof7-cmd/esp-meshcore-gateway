@@ -95,6 +95,9 @@ PlatformIO, Envs `gateway_heltec_v4` und `gateway_heltec_v4_r8`. MeshCore liegt 
 - Flasher-Dateien aktualisieren: `tools\flasher-update.ps1 -Build` (neue Version als „in Erprobung“, ältere bleiben
   wählbar), nach Bewährung `-Promote <Version>`, alte mit `-Remove <Version>`; danach `docs/fw/` committen
   und die Download-Links in `docs/admin-guide.md` Abschnitt 7 anpassen
+- GitHub-Release mit OTA-Dateien (bei **jeder** Version, nach Tag-Push): `tools\github-release.ps1` hängt die
+  `firmware.bin` beider Boards als `meshcore-gateway-heltec-v4[-r8]-<Version>.bin` an (in Erprobung = Pre-release),
+  nach Bewährung `tools\github-release.ps1 -Promote <Version>`
 
 Kanal-API für andere Systeme (ab 0.10.0): [`docs/api.md`](docs/api.md).
 
