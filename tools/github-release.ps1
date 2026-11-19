@@ -91,8 +91,12 @@ $notes = @(
 $notesPath = Join-Path $out 'notes.md'
 [IO.File]::WriteAllText($notesPath, ($notes -join "`n") + "`n", $utf8)
 
+# PS 5.1: stderr eines Programms („release not found“) wirft bei EAP Stop -> lokal Continue
+$eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 & gh release view $tag -R $repo --json tagName 2>$null | Out-Null
-if ($LASTEXITCODE -eq 0) {
+$exists = $LASTEXITCODE -eq 0
+$ErrorActionPreference = $eap
+if ($exists) {
     & gh release upload $tag -R $repo --clobber @assets
     if ($LASTEXITCODE) { throw 'gh release upload fehlgeschlagen' }
     & gh release edit $tag -R $repo --notes-file $notesPath
