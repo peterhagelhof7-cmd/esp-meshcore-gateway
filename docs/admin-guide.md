@@ -1,6 +1,6 @@
 # Admin-Handbuch: MeshCore-Gateway
 
-Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.10.1, MeshCore 1.18.0.
+Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.10.2, MeshCore 1.18.0.
 
 **Inhalt**
 
@@ -326,9 +326,9 @@ und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.
 
 - **Laufendes Gateway: System → Firmware-Update**, die `firmware.bin` für dein Board hochladen und
   „Hochladen & installieren“. Alle Einstellungen bleiben. Aktuelle Dateien:
-  - in Erprobung 0.10.1 (MeshCore 1.18.0):
-    [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.1/v4/firmware.bin) ·
-    [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.1/r8/firmware.bin)
+  - in Erprobung 0.10.2 (MeshCore 1.18.0, Sicherheits-Update der Webserver-Bibliothek):
+    [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.2/v4/firmware.bin) ·
+    [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.2/r8/firmware.bin)
   - bewährt 0.10.0 (MeshCore 1.18.0):
     [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.0/v4/firmware.bin) ·
     [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.0/r8/firmware.bin)

@@ -53,7 +53,15 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind auch ältere Versione
   auf dem Gerät erzeugt wird – z. B. zum Weiterleiten eines Kanals nach Telegram. Optional Senden in einen
   freigegebenen Kanal (max. 10 pro Stunde), etwa für Unwetter- und Katastrophenwarnungen (DWD, NINA/KATWARN).
 
-## Neu in 0.10.1 (in Erprobung)
+## Neu in 0.10.2 (in Erprobung)
+
+- **Sicherheit:** Webserver-Bibliothek ESPAsyncWebServer 3.10.3 → 3.12.1. Behebt CVE-2026-62966: Ein kaputter
+  Multipart-Upload an die Firmware-Update-Route konnte das Gateway abstürzen lassen (Neustart); vermutlich auch
+  ohne Anmeldung, weil die Bibliothek den Upload vor der Login-Prüfung zerlegt (nicht nachgestellt). Sonst keine
+  Änderungen gegenüber 0.10.1.
+
+## Neu in 0.10.1
+
 
 - **Heltec V4.3 (FEM KCT8103L) und V4.2 (GC1109):** Die Empfehlung wertet `radio.fem.rxgain` auf V4.2 als
   „nicht vorhanden“ statt als Abweichung. Das wirkungslose Feld „FEM-Sendeverstärker“ ist entfernt. Hinweis zum
