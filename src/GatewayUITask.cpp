@@ -4,6 +4,7 @@
 #include <time.h>
 
 #include "target.h"
+#include "Battery.h"
 #include "GatewayStatus.h"
 #include "NetworkManager.h"
 #include "LogBuffer.h"
@@ -82,6 +83,19 @@ void GatewayUITask::footer(int page) {
   snprintf(tmp, sizeof(tmp), "%d/%d", page, PAGES);
   _display->setCursor(0, 54);
   _display->print(tmp);
+
+  // Akku-Zustand rechts daneben, auf jeder Seite (E46)
+  battery::Info b = battery::get();
+  char bt[24];
+  if (b.state == batt::State::Present) {
+    snprintf(bt, sizeof(bt), "AKKU %.2fV %d%%", b.mv / 1000.0f, b.percent);
+  } else if (b.state == batt::State::Absent) {
+    strlcpy(bt, "kein AKKU", sizeof(bt));
+  } else {
+    return;
+  }
+  _display->setCursor(30, 54);
+  _display->print(bt);
 }
 
 void GatewayUITask::begin(NodePrefs* prefs, const char* buildDate, const char* firmwareVersion) {

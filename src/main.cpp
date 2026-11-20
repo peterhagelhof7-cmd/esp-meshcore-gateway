@@ -12,6 +12,7 @@
 
 #include "GatewayMesh.h"
 
+#include "Battery.h"
 #include "ChannelStore.h"
 #include "CliBridge.h"
 #include "EventLog.h"
@@ -55,8 +56,9 @@ void halt() {
 
 static char command[160];
 
-// stats-core liest die Akkuspannung; auf dem V4 blockiert das 10 ms
-// (HeltecV4Board::getBattMilliVolts, delay(10)) -> nicht öfter als nötig.
+// stats-core und die Akku-Erkennung (E46) lesen die Akkuspannung; auf dem V4
+// blockiert das je 10 ms (HeltecV4Board::getBattMilliVolts, delay(10)) ->
+// nicht öfter als nötig.
 static const unsigned long STATUS_UPDATE_INTERVAL_MS = 5000;
 static unsigned long next_status_update = 0;
 
@@ -264,6 +266,7 @@ void loop() {
     }
   }
   if ((long)(millis() - next_status_update) >= 0) {
+    battery::sample(board.getBattMilliVolts());   // Akku-Erkennung (E46)
     gateway_status::update();
     next_status_update = millis() + STATUS_UPDATE_INTERVAL_MS;
   }

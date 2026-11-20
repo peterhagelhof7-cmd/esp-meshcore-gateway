@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 
+#include "Battery.h"
 #include "ChannelStore.h"
 #include "ChannelLine.h"
 #include "CliBridge.h"
@@ -106,6 +107,25 @@ static void handleStatus(AsyncWebServerRequest* req) {
   float chip = sm_poller::chipTempC();
   j += ",\"chip_temp_c\":";
   j += isnan(chip) ? String("null") : String(chip, 1);
+  {
+    // Akku am internen Stecker (E46)
+    battery::Info b = battery::get();
+    j += ",\"battery\":{\"state\":\"";
+    j += batt::stateKey(b.state);
+    j += "\",\"text\":\"";
+    j += batt::stateText(b.state);
+    j += "\",\"reason\":\"";
+    j += batt::reasonText(b.reason);
+    j += "\",\"mv\":";
+    j += String(b.mv);
+    j += ",\"last_mv\":";
+    j += String(b.lastMv);
+    j += ",\"spread_mv\":";
+    j += String(b.spreadMv);
+    j += ",\"percent\":";
+    j += b.percent >= 0 ? String(b.percent) : String("null");
+    j += "}";
+  }
   j += ",\"project\":\"";
   j += ota_update::projectId();
   j += "\",\"partition\":\"";

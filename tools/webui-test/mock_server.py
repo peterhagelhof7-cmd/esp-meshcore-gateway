@@ -313,6 +313,16 @@ UNITS = {'temperature': '°C', 'humidity': '%', 'pressureHpa': 'hPa', 'lux': 'lx
          'battery': 'V', 'uptimeH': 'h', 'noiseFloor': 'dBm'}
 INTERNAL = 100        # Pseudo-Gerät "Gateway (intern)", wie sm::INTERNAL_DEVICE
 CHIP_TEMP = 52.3
+# Akku am internen Stecker (E46); Test schaltet per GET /mock/battery?state=…
+BATTERIES = {
+    'absent': {'state': 'absent', 'text': 'kein AKKU', 'reason': 'Spannung schwankt (Lader ohne Akku)',
+               'mv': 4310, 'last_mv': 4480, 'spread_mv': 620, 'percent': None},
+    'present': {'state': 'present', 'text': 'AKKU vorhanden', 'reason': '',
+                'mv': 3920, 'last_mv': 3915, 'spread_mv': 20, 'percent': 66},
+    'checking': {'state': 'checking', 'text': 'wird geprüft', 'reason': '',
+                 'mv': 0, 'last_mv': 0, 'spread_mv': 0, 'percent': None},
+}
+BATTERY = dict(BATTERIES['absent'])
 LABELS = {'temperature': 'Temperatur', 'humidity': 'Feuchte', 'pressureHpa': 'Luftdruck', 'lux': 'Helligkeit', 'eco2Ppm': 'eCO2', 'chipTemp': 'Chiptemperatur',
           'battery': 'Akku', 'uptimeH': 'Laufzeit', 'noiseFloor': 'Rauschen'}
 
@@ -529,7 +539,10 @@ class FakeSm:
         self.evaluate(i, d['name'], vals)
 
     def internal_values(self):
-        return [{'path': 'gateway.chipTemp', 'sensor': '', 'label': 'Chiptemperatur', 'unit': '°C', 'value': CHIP_TEMP}]
+        v = [{'path': 'gateway.chipTemp', 'sensor': '', 'label': 'Chiptemperatur', 'unit': '°C', 'value': CHIP_TEMP}]
+        if BATTERY['state'] == 'present':   # Spannung nur mit erkanntem Akku (E46)
+            v.append({'path': 'gateway.battery', 'sensor': '', 'label': 'Akku', 'unit': 'V', 'value': BATTERY['mv'] / 1000.0})
+        return v
 
     def evaluate(self, i, name, vals):
         for ri, r in enumerate(self.cfg['rules']):
@@ -960,9 +973,14 @@ class H(BaseHTTPRequestHandler):
             b = index_html()
             self.send_response(200); self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b); return
+        if u.path == '/mock/battery':
+            st = parse_qs(u.query).get('state', ['absent'])[0]
+            BATTERY.clear(); BATTERY.update(BATTERIES[st])
+            return self.send_json({'ok': True})
         if u.path == '/api/status':
             p = cli.p
             return self.send_json({'gateway': {'version': GW_VERSION, 'uptime_ms': 1000, 'free_heap': 180000, 'cpu_mhz': 240, 'chip_temp_c': CHIP_TEMP,
+                                   'battery': BATTERY,
                                    'project': GW_PROJECT, 'partition': 'app0', 'image_state': 'gültig',
                                    'min_free_heap': 150000, 'psram_total': 2097152, 'psram_free': 1800000, 'psram_min_free': 1750000},
               'node': {'name': p['name'], 'pubkey': 'ab' * 32, 'role': 'repeater', 'firmware': 'v1.18.0', 'build_date': '15 Oct 2026',

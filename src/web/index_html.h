@@ -131,6 +131,7 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <dt>Freier Heap</dt><dd id="g_heap">–</dd>
 <dt>PSRAM</dt><dd id="g_psram">–</dd>
 <dt>Chiptemperatur</dt><dd id="g_chip" title="Temperatur im ESP32-S3, nicht die Raumtemperatur">–</dd>
+<dt>Akku</dt><dd id="g_bat" title="Akku am internen Stecker. Hängt das Gateway an USB, zeigt die Spannung die Ladespannung, der Prozentwert ist dann zu hoch.">–</dd>
 </dl>
 </section>
 <section>
@@ -530,6 +531,9 @@ async function refresh(){
     set('g_heap',kb(gw.free_heap)+' KB'+(gw.min_free_heap?' (Tiefststand '+kb(gw.min_free_heap)+' KB)':''));
     set('g_psram',gw.psram_total?kb(gw.psram_total-gw.psram_free)+' von '+kb(gw.psram_total)+' KB belegt ('+Math.round(100*(gw.psram_total-gw.psram_free)/gw.psram_total)+' %, frei min. '+kb(gw.psram_min_free)+' KB)':null);
     set('g_chip',typeof j.gateway.chip_temp_c==='number'?j.gateway.chip_temp_c.toFixed(1)+' °C':null);
+    const bt=j.gateway.battery;
+    set('g_bat',!bt?null:bt.state==='present'?bt.text+' · '+(bt.mv/1000).toFixed(2).replace('.',',')+' V'+(bt.percent!==null?' (ca. '+bt.percent+' %)':'')
+      :bt.state==='absent'?bt.text+(bt.reason?' ('+bt.reason+')':''):bt.text+' …');
     set('fw_ver',j.gateway.version+' (MeshCore '+n.firmware+')');set('fw_proj',j.gateway.project);
     set('fw_part',j.gateway.partition+' · '+j.gateway.image_state);
     $('wifiPill').textContent=(modes[w.mode]||w.mode)+' · '+w.ip;

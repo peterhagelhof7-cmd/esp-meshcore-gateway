@@ -35,7 +35,9 @@ async function runCli(page, cmd) {
 
   check('Status: Name gesetzt', (await page.$eval('#n_name', e => e.textContent)) === 'Heltec Repeater');
   check('Status: Laufzeit formatiert', (await page.$eval('#c_up', e => e.textContent)) === '1 h 2 min');
-  check('Status: keine Akku-Zeile', !(await page.$('#c_bat')));
+  // Akku am internen Stecker (E46): Standard im Mock = kein Akku
+  const batTxt = () => page.$eval('#g_bat', e => e.textContent);
+  check('Status: Akku-Zeile "kein AKKU" mit Grund', /^kein AKKU \(Spannung schwankt/.test(await batTxt()), await batTxt());
   const nbWait = async (fn, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await sleep(250); } return false; };
   // Nachbarn (E34): Kennung, Alter, SNR in dB (Rohwert /4)
   const nbRows = () => page.$$eval('#nbBody tr', r => r.map(t => [...t.children].map(c => c.textContent)));
@@ -290,10 +292,22 @@ async function runCli(page, cmd) {
     check('SM: Gateway-intern-Zeile mit Chiptemperatur', devRows.length === 3 && devRows[2][0] === 'Gateway (intern)' &&
           /Chiptemperatur 52\.3°C/.test(devRows[2][3]), JSON.stringify(devRows[2]));
     check('Status: Chiptemperatur angezeigt', (await t('#g_chip')) === '52.3 °C', await t('#g_chip'));
+    // Akku (E46): ohne Akku kein Messwert für Regeln, mit Akku Spannung + Prozent + Regel-Messwert
+    check('Akku: ohne Akku kein Regel-Messwert', !devRows[2][3].includes('Akku'), devRows[2][3]);
+    await page.evaluate(() => fetch('/mock/battery?state=present'));
+    check('Akku: "AKKU vorhanden" mit Spannung und Prozent', await until(async () =>
+          (await t('#g_bat')) === 'AKKU vorhanden · 3,92 V (ca. 66 %)', 10000), await t('#g_bat'));
+    await page.evaluate(() => fetch('/mock/battery?state=checking'));
+    check('Akku: "wird geprüft …" vor der ersten Entscheidung', await until(async () => (await t('#g_bat')) === 'wird geprüft …', 10000), await t('#g_bat'));
+    await page.evaluate(() => fetch('/mock/battery?state=present'));
+    await until(async () => /^AKKU vorhanden/.test(await t('#g_bat')), 10000);
     check('Status: Heap mit Tiefststand', (await t('#g_heap')) === '176 KB (Tiefststand 146 KB)', await t('#g_heap'));
     check('Status: PSRAM belegt/gesamt/min', (await t('#g_psram')) === '290 von 2048 KB belegt (14 %, frei min. 1709 KB)', await t('#g_psram'));
     await page.select('#srDev', '100');
     await until(async () => (await page.$$eval('#srPath option', o => o.map(x => x.value))).includes('gateway.chipTemp'));
+    check('Akku: Regel-Messwert gateway.battery mit Akku wählbar', await until(async () =>
+          (await page.$$eval('#srPath option', o => o.map(x => x.value))).includes('gateway.battery'), 10000),
+          JSON.stringify(await page.$$eval('#srPath option', o => o.map(x => x.value))));
     await page.select('#srPath', 'gateway.chipTemp');
     await setVal('#srThr', '40');
     await setVal('#srText', '');

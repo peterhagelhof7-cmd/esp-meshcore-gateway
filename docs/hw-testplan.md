@@ -148,3 +148,14 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
   `messages?since=0` → Gateway-Sendungen und Alarm mit `dir: tx`; Senden in Public (nicht frei) 403, in haus-alarm 200
   „API-Test äöüß ⚠ 📡“ unverändert zurück und im Log als „API … von 10.10.0.182“; Schlüssel nicht im Log.
   Offen: App-Nachricht als `dir: rx`, Ausschalten → 403, `boot` nach Neustart, 429.
+
+## 15. Akku-Anzeige (E46, 0.11.0) – braucht 1S-LiPo mit passendem Stecker + Multimeter
+- [ ] Ohne Akku, an USB: Status „kein AKKU“ (Grund notieren), Display-Fußzeile „kein AKKU“; `/api/status` →
+      `battery.mv`, `last_mv`, `spread_mv` über ein paar Minuten notieren (stimmen die Grenzwerte in `BatteryLogic.h`?)
+- [ ] Akku anstecken (an USB): nach ≤ 1 min „AKKU vorhanden“, Ereignis-Log-Eintrag; Spannung mit Multimeter am Akku
+      vergleichen (an USB = Ladespannung)
+- [ ] USB abziehen (Akkubetrieb): Gateway läuft weiter, Spannung ≈ Multimeter (±0,1 V), Ladezustand plausibel;
+      sonst `set adc.multiplier` abgleichen
+- [ ] Akku im Betrieb abziehen (an USB): nach ≤ 1 min „kein AKKU“ + Log-Eintrag
+- [ ] Regel „Gateway (intern) · Akku < (aktueller Wert + 0,1 V)“ → Meldung; ohne Akku ist der Messwert nicht wählbar
+- [ ] App/anderer Repeater: Status-Abfrage des Gateways liefert dieselbe Spannung (MeshCore `batt_milli_volts`)

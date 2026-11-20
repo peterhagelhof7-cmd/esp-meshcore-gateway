@@ -1,6 +1,6 @@
 # Admin-Handbuch: MeshCore-Gateway
 
-Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.10.2, MeshCore 1.18.0.
+Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.11.0, MeshCore 1.18.0.
 
 **Inhalt**
 
@@ -47,7 +47,15 @@ Firmware-Update aufspielen: beide prüfen das Board.
 - **Sendeleistung:** Voreingestellt `tx 17` (ca. 520 mW am Ausgang des V4). Erlaubt sind in Deutschland 500 mW ERP
   im Bereich 869,4–869,65 MHz. Mit einer Antenne über ca. 2 dBi die Leistung senken
   (ERP = Sendeleistung + Antennengewinn in dBd − Kabelverluste).
-- **Stromversorgung:** USB-C, 5 V. Akku und Bluetooth nutzt das Gateway nicht.
+- **Stromversorgung:** USB-C, 5 V. Optional ein 1S-LiPo (3,7 V) am internen Akku-Stecker als Pufferung bei
+  Stromausfall; das Board lädt ihn über USB. Bluetooth nutzt das Gateway nicht.
+- **Akku-Anzeige (ab 0.11.0):** Status-Seite und Display zeigen „AKKU vorhanden“ mit Spannung und ungefährem
+  Ladezustand oder „kein AKKU“ (mit Grund). Das Gateway erkennt den Akku an einer ruhigen Spannung zwischen 2,5 und
+  4,35 V; ohne Akku liefert der Laderegler nur eine springende oder zu hohe Spannung. Die erste Entscheidung fällt
+  ca. 15 s nach dem Start, ein Wechsel (Akku an-/abgesteckt) wird nach etwa 1 min angezeigt und ins Ereignis-Log
+  geschrieben. **An USB** zeigt die Spannung die Ladespannung, der Ladezustand ist dann zu hoch – aussagekräftig ist
+  er im Akkubetrieb. Abweichung der Messung ca. ±0,1 V; abgleichen mit Multimeter und Konsole
+  `set adc.multiplier <Wert>` (Standard 5,42).
 - **Taste PRG:** schaltet das Display ein und blättert die Seiten. Ein langer Druck schaltet das Gateway **nicht**
   aus (ohne Akku wäre es sonst nur durch Stromtrennung zurückzuholen).
 - **Ohne Display / mit TFT:** Läuft genauso, nur die Anzeige fehlt (TFT bleibt dunkel). Die IP steht dann im Router,
@@ -217,10 +225,10 @@ Nach dem Einrichten über **Überwachung → Regel → Test** prüfen, ob die Me
 
 | Bereich | Wofür |
 |---|---|
-| **Status** | Knoten, Funk (Rauschpegel, letzte RSSI/SNR), Paketzähler, WLAN, Chiptemperatur, Heap und PSRAM (mit Tiefststand), **Nachbarn** |
+| **Status** | Knoten, Funk (Rauschpegel, letzte RSSI/SNR), Paketzähler, WLAN, Chiptemperatur, **Akku**, Heap und PSRAM (mit Tiefststand), **Nachbarn** |
 | **Konsole** | [Offizielle MeshCore-CLI](https://docs.meshcore.io/cli_commands/) (`get …`, `set …`, `neighbors`, `advert`, `region …`), auch für **andere Repeater per Funk** (Fernkonsole, siehe unten). Kritische Befehle (z. B. `erase`) fragen nach. |
 | **Kanäle** | Kanäle anlegen (Hashtag, privat mit Schlüssel aus der App, Public), Nachrichten lesen und senden. Max. 8 Kanäle. |
-| **Überwachung** | Sensormeter im LAN, Regeln mit Grenzwert, Hysterese und Entwarnung; Ping-Ziele; Chiptemperatur als „Gateway (intern)“. Meldungen gehen in den gewählten Kanal, auf Wunsch „aktiv bis bestätigt“ (siehe unten). |
+| **Überwachung** | Sensormeter im LAN, Regeln mit Grenzwert, Hysterese und Entwarnung; Ping-Ziele; Chiptemperatur und – mit Akku – Akkuspannung als „Gateway (intern)“. Meldungen gehen in den gewählten Kanal, auf Wunsch „aktiv bis bestätigt“ (siehe unten). |
 | **Pakete** | Live-Mitschnitt der empfangenen/gesendeten Pakete |
 | **Einstellungen** | MeshCore-Einstellungen, Empfehlung, Regionen, Admin-Passwort, Backup |
 | **System** | WLAN, Firmware-Update, Ereignis-Log (Download, max. 128 KB im Flash), Kanal-API-Schlüssel |

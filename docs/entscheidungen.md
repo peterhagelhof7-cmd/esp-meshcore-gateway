@@ -113,7 +113,7 @@ privaten Schlüssel lesen oder den Knoten löschen. Das Passwort selbst geht dab
 Admin-Passwort übers Mesh dieselben Rechte gibt.
 Offene Option für später: Schalter „Schlüssel-Befehle im Web sperren“ oder HTTPS.
 
-## E12 – Kein Akku, kein Bluetooth (2026-10-13, Vorgabe User)
+## E12 – Kein Akku, kein Bluetooth (2026-10-13, Vorgabe User) – Akku-Teil aufgehoben durch E46
 Akku und Bluetooth sind derzeit nicht zur Nutzung vorgesehen.
 - Die Statusseite zeigt keine Akkuspannung mehr. `stats-core` in der Konsole liefert `battery_mv`
   weiterhin unverändert wie im Original.
@@ -914,3 +914,34 @@ einmal im Mesh, Zeilen zusammengezogen, eigene Warnung nicht zurück nach Telegr
 **Verifikation:** v0.10.1 per Skript neu erzeugt (Aktualisieren-Zweig): Dateien byte-gleich mit Flasher und live auf
 dem Testgerät, Notes mit korrekten Umlauten (Skript mit UTF-8-BOM wegen PowerShell 5.1). Anlegen-Zweig erst beim
 nächsten Release real getestet.
+
+
+## E46 – Akku-Anzeige mit Erkennung (2026-11-20, User: „E12 zurücknehmen und Akku-Anzeige einbauen, mit einer prüfung, wenn kein akku angeschlossen, dann status "kein AKKU" ansonnsten "AKKU vorhanden"“), 0.11.0
+
+Hebt den Akku-Teil von E12 auf; Bluetooth bleibt weg.
+
+- **Messung:** unverändert MeshCore (`HeltecV4Board::getBattMilliVolts`, GPIO1 über Teiler, GPIO37 schaltet die
+  Messung ein, Faktor `adc.multiplier`, Standard 5,42). Der loopTask übernimmt alle 5 s mit dem Status-Snapshot eine
+  Messung in `battery::sample()` (10 ms blockierend, wie stats-core).
+- **Erkennung** (`src/BatteryLogic.*`, host-getestet): gleitendes Fenster über 12 Messungen (1 min). „kein AKKU“, wenn
+  das Mittel unter 2,5 V oder über 4,35 V liegt oder die Spannung im Fenster um mehr als 250 mV springt; sonst
+  „AKKU vorhanden“. Erste Entscheidung nach 3 Messungen (vorher „wird geprüft“), danach wechselt der Zustand erst nach
+  3 gleichen Bewertungen hintereinander. Grund: Ohne Akku hängt am Teiler nur der Ladeausgang; der liefert je nach
+  Laderegler nichts, eine Spannung über der LiPo-Ladeschlussspannung oder springt, weil er ohne Last neu startet.
+  **Grenzwerte sind abgeleitet, nicht gemessen** → HW-Testplan §15; bei Bedarf in `BatteryLogic.h` anpassen.
+- **Grenze der Erkennung:** Ein Akku an USB wird zuverlässig erkannt, sein Ladezustand nicht: Gemessen wird dann die
+  Ladespannung. Ein Netzteil, das ohne Akku eine ruhige Spannung zwischen 2,5 und 4,35 V an VBAT liefert, würde als
+  Akku erkannt (beim V4-Lader nicht zu erwarten, siehe §15).
+- **Ladezustand:** grobe 1S-LiPo-Kurve (Stützpunkte 4,20 V = 100 % … 3,27 V = 0 %), nur bei „AKKU vorhanden“.
+- **Anzeige:** Status-Seite (Zeile „Akku“, mit Grund bei „kein AKKU“), Display-Fußzeile auf jeder Seite,
+  `/api/status` → `gateway.battery` (`state` present/absent/checking, `text`, `reason`, `mv`, `last_mv`, `spread_mv`,
+  `percent`). Zustandswechsel stehen im Ereignis-Log.
+- **Regeln/Zabbix:** Messwert `gateway.battery` (V) am Pseudo-Gerät „Gateway (intern)“, **nur mit erkanntem Akku** –
+  sonst würde eine Regel „Akku unter 3,5 V“ auf der Ladespannung bzw. auf Unsinn auslösen. Zabbix läuft wie bisher
+  über die Regeln (E41).
+- **Funk:** MeshCore meldet die Spannung wie bisher unverändert an App und andere Repeater (`batt_milli_volts`,
+  Telemetrie) – auch ohne Akku. Das bleibt so (Upstream-Verhalten, App kennt keinen „kein Akku“-Zustand).
+
+**Verifikation:** Host-Test `battery_test` (22 Prüfungen, u. a. Lader springt/zu hoch/zu niedrig, Akku lädt an USB,
+Ausreißer, An-/Abstecken), UI-Test gegen Mock (Akku-Zeile in drei Zuständen, Regel-Messwert nur mit Akku),
+Build V4 + R8 grün. Auf echter Hardware noch nicht geprüft.

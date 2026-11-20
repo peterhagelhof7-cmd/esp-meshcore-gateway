@@ -19,6 +19,7 @@ static const uint16_t PING_INTERVAL_DEF_S = 10;
 // devices[], wird auch ohne WLAN gemessen.
 static const int INTERNAL_DEVICE = 100;
 static const char* const INTERNAL_PATH_CHIP_TEMP = "gateway.chipTemp";
+static const char* const INTERNAL_PATH_BATTERY = "gateway.battery";   // V, nur mit Akku (E46)
 static const uint32_t INTERNAL_INTERVAL_MS = 60000;
 
 struct Device {

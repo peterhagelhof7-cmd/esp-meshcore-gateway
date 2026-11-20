@@ -6,6 +6,7 @@
 #include <new>
 
 #include "AckTracker.h"
+#include "Battery.h"
 #include "GatewayStatus.h"
 #include "ChannelStore.h"
 #include "EventLog.h"
@@ -547,7 +548,9 @@ void rebasePings() {
   xSemaphoreGive(s_lock);
 }
 
-// Chiptemperatur des ESP32-S3 (E30): alle 60 s messen, Regeln auswerten (auch
+void addValue(DevRuntime& dr, const char* path, float v);
+
+// Chiptemperatur des ESP32-S3 (E30) und Akku (E46): alle 60 s messen, Regeln auswerten (auch
 // ohne WLAN - Meldungen gehen per Funk), stündlich ins Ereignis-Log.
 void measureInternal(bool evaluate) {
   static uint32_t lastMs = 0, lastLogMs = 0;
@@ -572,6 +575,10 @@ void measureInternal(bool evaluate) {
     strlcpy(dr.values[0].path, INTERNAL_PATH_CHIP_TEMP, sizeof(dr.values[0].path));
     dr.values[0].sensorName[0] = 0;
     dr.values[0].value = t;
+    // Akkuspannung nur mit erkanntem Akku (E46): ohne Akku misst der V4 nur
+    // den Ladeausgang, eine Regel würde dann auf Unsinn auslösen.
+    battery::Info b = battery::get();
+    if (b.state == batt::State::Present) addValue(dr, INTERNAL_PATH_BATTERY, b.mv / 1000.0f);
     dr.lastOkMs = now;
     dr.everOk = true;
     dr.error[0] = 0;
