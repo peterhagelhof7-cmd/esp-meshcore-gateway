@@ -60,7 +60,7 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind auch ältere Versione
   `gateway.battery` für Regeln (z. B. Akku unter 3,5 V → Meldung) bereit, aber nur mit erkanntem Akku.
   Hängt das Gateway an USB, zeigt die Spannung die Ladespannung; der Ladezustand ist dann zu hoch.
 
-## Neu in 0.10.2
+## Neu in 0.10.2 (in Erprobung)
 
 - **Sicherheit:** Webserver-Bibliothek ESPAsyncWebServer 3.10.3 → 3.12.1. Behebt CVE-2026-62966: Ein kaputter
   Multipart-Upload an die Firmware-Update-Route konnte das Gateway abstürzen lassen (Neustart); vermutlich auch
