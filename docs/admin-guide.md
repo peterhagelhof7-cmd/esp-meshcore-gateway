@@ -1,6 +1,6 @@
 # Admin-Handbuch: MeshCore-Gateway
 
-Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.11.0, MeshCore 1.18.0.
+Für alle, die ein Gateway aufsetzen und betreiben. Stand: Firmware 0.12.0, MeshCore 1.18.0.
 
 **Inhalt**
 
@@ -231,7 +231,7 @@ Nach dem Einrichten über **Überwachung → Regel → Test** prüfen, ob die Me
 | **Überwachung** | Sensormeter im LAN, Regeln mit Grenzwert, Hysterese und Entwarnung; Ping-Ziele; Chiptemperatur und – mit Akku – Akkuspannung als „Gateway (intern)“. Meldungen gehen in den gewählten Kanal, auf Wunsch „aktiv bis bestätigt“ (siehe unten). |
 | **Pakete** | Live-Mitschnitt der empfangenen/gesendeten Pakete |
 | **Einstellungen** | MeshCore-Einstellungen, Empfehlung, Regionen, Admin-Passwort, Backup |
-| **System** | WLAN, Firmware-Update, Ereignis-Log (Download, max. 128 KB im Flash), Kanal-API-Schlüssel |
+| **System** | WLAN, Firmware-Update, Ereignis-Log (Download, max. 128 KB im Flash), Kanal-API-Schlüssel, Öffentliche Karte |
 
 **Display** (Taste PRG, Auto-Aus nach 60 s): 1 Netz (Name, WLAN, IP) · 2 Funk · 3 Mesh (Pakete, Uhrzeit) ·
 4 neueste Kanalnachricht bzw. Alarm.
@@ -330,10 +330,26 @@ senden. Der Zugriff läuft über einen eigenen API-Schlüssel, nicht über das A
 **Private Kanäle** aus der App übernehmen: In der App den Kanal teilen bzw. den Schlüssel anzeigen (32 Hex-Zeichen)
 und unter Kanäle → „Privat“ mit gleichem Namen und Schlüssel anlegen.
 
+**Öffentliche Karte** (ab 0.12.0): Das Gateway kann sich und die von ihm gehörten Repeater/Room-Server selbst in die
+öffentliche Karte **[map.meshcore.io](https://map.meshcore.io)** eintragen – ohne Companion-App.
+- System → **Öffentliche Karte**. „Eigenen Eintrag listen“ lädt den eigenen Knoten hoch, „Bekannte Repeater listen“
+  die gehörten Repeater (Tabelle darunter). Für einen sinnvollen Eintrag sollte unter [4.3](#43-name-position-kontakt)
+  eine **Position** gesetzt sein, sonst erscheint der Knoten ohne Standort.
+- **Automatisch melden alle N Stunden**: Standard **6** (0 = aus). Gemeldet wird kurz nach dem Start und danach im
+  Intervall – jeweils eigener Eintrag und bekannte Repeater.
+- **Upload-Schlüssel**: wird auf dem Gerät erzeugt (nicht der Knotenschlüssel). Nur mit ihm lässt sich ein von ihm
+  angelegter Karteneintrag später aktualisieren; „Zufälligen Upload-Schlüssel erzeugen“ würfelt ihn neu. Der
+  Schlüssel ist nicht im Backup.
+- Hochgeladen werden nur knotensignierte Adverts; der Eintrag ist **öffentlich im Internet** sichtbar. Entfernen
+  eines Eintrags geht nur über das Gerät/die App, die ihn angelegt hat.
+
 ## 7. Updates
 
 - **Laufendes Gateway: System → Firmware-Update**, die `firmware.bin` für dein Board hochladen und
   „Hochladen & installieren“. Alle Einstellungen bleiben. Aktuelle Dateien:
+  - in Erprobung 0.12.0 (MeshCore 1.18.0, Eintrag in die öffentliche Karte):
+    [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.12.0/v4/firmware.bin) ·
+    [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.12.0/r8/firmware.bin)
   - in Erprobung 0.10.2 (MeshCore 1.18.0, Sicherheits-Update der Webserver-Bibliothek):
     [V4](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.2/v4/firmware.bin) ·
     [V4-R8](https://peterhagelhof7-cmd.github.io/esp-meshcore-gateway/fw/0.10.2/r8/firmware.bin)

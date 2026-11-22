@@ -5,6 +5,7 @@
 #include "SmPoller.h"
 #include "ZbxForwarder.h"
 #include "RemoteAdmin.h"
+#include "MapUploader.h"
 
 #include <helpers/AdvertDataHelpers.h>
 #include <helpers/TxtDataHelpers.h>
@@ -203,7 +204,35 @@ void GatewayMesh::onAdvertRecv(mesh::Packet* packet, const mesh::Identity& id, u
   AdvertDataParser parser(app_data, app_data_len);
   if (parser.isValid()) {
     remote::onAdvert(id.pub_key, parser.getName(), parser.getType(), packet->getPathHashCount(), packet->getSNR());
+    // E47: gehörtes Advert als Rohpaket für den Karten-Uploader merken.
+    uint8_t raw[MAX_TRANS_UNIT];
+    int n = packet->writeTo(raw);
+    if (n > 0) {
+      map_uploader::captureHeard(raw, (uint8_t)n, id.pub_key, parser.hasName() ? parser.getName() : nullptr,
+                                 parser.getType(), parser.hasLatLon(), timestamp);
+    }
   }
+}
+
+int GatewayMesh::buildSelfAdvertRaw(uint8_t* dest, size_t max_len) {
+  // Wie MyMesh::createSelfAdvert (dort privat): Advert-Daten + createAdvert.
+  // Standort gemäß advert_loc_policy aus den Prefs (fester node_lat/lon).
+  NodePrefs* p = getNodePrefs();
+  uint8_t app_data[MAX_ADVERT_DATA_SIZE];
+  uint8_t app_len;
+  if (p->advert_loc_policy == ADVERT_LOC_NONE) {
+    AdvertDataBuilder b(ADV_TYPE_REPEATER, p->node_name);
+    app_len = b.encodeTo(app_data);
+  } else {
+    AdvertDataBuilder b(ADV_TYPE_REPEATER, p->node_name, p->node_lat, p->node_lon);
+    app_len = b.encodeTo(app_data);
+  }
+  mesh::Packet* pkt = createAdvert(self_id, app_data, app_len);
+  if (!pkt) return 0;
+  int n = pkt->writeTo(dest);
+  releasePacket(pkt);
+  if (n < 0 || (size_t)n > max_len) return 0;
+  return n;
 }
 
 // Antworten auf die Nachbarsuche (nach dem Start, CLI "discover.neighbors")

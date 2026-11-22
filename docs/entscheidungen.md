@@ -945,3 +945,37 @@ Hebt den Akku-Teil von E12 auf; Bluetooth bleibt weg.
 **Verifikation:** Host-Test `battery_test` (22 Prüfungen, u. a. Lader springt/zu hoch/zu niedrig, Akku lädt an USB,
 Ausreißer, An-/Abstecken), UI-Test gegen Mock (Akku-Zeile in drei Zuständen, Regel-Messwert nur mit Akku),
 Build V4 + R8 grün. Auf echter Hardware noch nicht geprüft.
+
+## E47 – Karten-Uploader: Gateway + gehörte Repeater selbst in die öffentliche Karte (2026-11-22, User: „baue den Karten-Uploader ins Gateway ein, es soll die optionen bieten: eigenen eintrag listen, bekannte repeater listen, und zufälligen upload key generieren“ + „eine Zeit einstellbar … standard in 6 stunden schritten melden, also nach boot, dann alle 6 stunden“), 0.12.0
+
+Das Gateway trägt sich und die von ihm gehörten Repeater/Room-Server selbst in die öffentliche MeshCore-Karte
+`map.meshcore.io` ein – ohne Companion-App.
+
+- **Grundlage (am echten Gerät geprüft 2026-11-22):** Die Karte nimmt an `POST /api/v1/uploader/node` jedes
+  *knotensignierte* Advert an, egal mit welchem Schlüssel hochgeladen wird; verlangt wird nur, dass die
+  Upload-Signatur zum mitgesendeten `publicKey` passt. Datenformat:
+  `data = {"params":{"freq":MHz,"cr":,"sf":,"bw":kHz},"links":["meshcore://<rohes Advert hex>"]}`,
+  `signature = Ed25519(SHA-256(data))`, `publicKey` = Upload-Schlüssel.
+- **Upload-Schlüssel** (`src/MapUploader.*`, NVS-Namespace `mapup`): eigenes Ed25519-Paar, NICHT der Knotenschlüssel.
+  Beim ersten Start automatisch erzeugt; „Zufälligen Upload-Schlüssel erzeugen“ würfelt ihn neu. Nur mit dem
+  Schlüssel, der einen Karteneintrag angelegt hat, lässt er sich später aktualisieren (Karte merkt `updated_by`).
+  Verlust bei NVS-Erase unkritisch: Zuordnung erfolgt über den Knotenschlüssel im Advert, ein neuer Upload legt den
+  Eintrag mit neuem Schlüssel erneut an.
+- **Rohpakete:** Das eigene Advert baut der loopTask bei Bedarf frisch (aktueller Zeitstempel) über
+  `GatewayMesh::buildSelfAdvertRaw` (wie `createSelfAdvert`, das privat ist: AdvertDataBuilder + `createAdvert`,
+  Standort gemäß `advert_loc_policy`/`node_lat`/`node_lon`). Gehörte Adverts fängt `onAdvertRecv` als Rohpaket ab
+  (`packet->writeTo`), nur Repeater/Room, neuestes je Knoten, max. 24 im RAM.
+- **HTTPS:** eigener Core-0-Task (`WiFiClientSecure` + `HTTPClient`, `setInsecure()`), damit weder loopTask noch der
+  Web-Task blockiert. E4-Trennung: Capture nur im Mesh-Kontext, Upload im Task, Web setzt nur Flags (Mutex).
+- **Weboberfläche** (System → Öffentliche Karte): Upload-Schlüssel, letztes Ergebnis, Buttons „Eigenen Eintrag listen“
+  / „Bekannte Repeater listen“ (mit Tabelle der gehörten Repeater) / „Zufälligen Upload-Schlüssel erzeugen“, dazu
+  Feld „Automatisch melden alle N Stunden (0 = aus)“. API: `/api/mapupload` GET (Status),
+  POST `action=self|known|newkey|auto`.
+- **Automatisches Melden:** Intervall in Stunden im NVS (`auto_h`, Standard 6, 0 = aus). Kurz nach dem Boot
+  (~2 min, wenn WLAN steht; sonst 5-min-Wiederholung) und danach alle N Stunden werden eigener Eintrag und bekannte
+  Repeater gemeldet.
+- **Sicherheit/Privatsphäre:** Hochgeladen wird nur auf Aktion bzw. nach eingestelltem Intervall; der Eintrag ist
+  öffentlich. Web-Buttons fragen vorher nach. Nur knotensignierte Adverts (keine gefälschten Einträge möglich).
+
+**Verifikation:** Build V4 grün (Flash 24,1 %, +~180 KB durch mbedTLS/HTTPS). R8-Build und Hardware-Test stehen aus;
+nicht geflasht, nicht released.

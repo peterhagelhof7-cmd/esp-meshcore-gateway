@@ -472,6 +472,24 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 <p class="hint">Für andere Systeme im LAN (z. B. home-central → Telegram): nur lesender Zugriff auf Kanäle und Nachrichten, ohne Admin-Passwort. Anfrage mit Header <span class="mono">X-API-Key: &lt;Schlüssel&gt;</span>: <span class="mono">GET /api/v1/channels</span>, <span class="mono">GET /api/v1/messages?since=0</span> (optional <span class="mono">&amp;channel=Name</span>; Antwort enthält <span class="mono">next</span> für die nächste Abfrage). Neu erzeugen macht den alten Schlüssel sofort ungültig. Übertragung unverschlüsselt (HTTP) – nur im eigenen Netz nutzen.</p>
 <p class="hint">Senden (z. B. Unwetter- und NINA-Warnungen von home-central): nur in den oben freigegebenen Kanal, höchstens <span id="akPerH">10</span> Nachrichten pro Stunde, <span class="mono">POST /api/v1/send</span> mit den Feldern <span class="mono">channel</span> und <span class="mono">text</span>. Zu lange Texte werden gekürzt.</p>
 </section>
+
+<section style="margin-top:16px">
+<h2>Öffentliche Karte</h2>
+<dl>
+<dt>Upload-Schlüssel</dt><dd><span class="mono" id="mapKey">–</span></dd>
+<dt>Letztes Ergebnis</dt><dd id="mapLast">–</dd>
+</dl>
+<div class="row">
+<button type="button" id="mapSelf">Eigenen Eintrag listen</button>
+<button type="button" class="sec" id="mapKnown">Bekannte Repeater listen</button>
+<button type="button" class="sec" id="mapNewKey">Zufälligen Upload-Schlüssel erzeugen</button>
+<span class="msg" id="mapMsg" style="margin:0"></span>
+</div>
+<div class="row"><label for="mapAuto" style="margin:0">Automatisch melden alle</label><input type="number" id="mapAuto" min="0" max="168" step="1" style="width:80px"> Stunden (0 = aus)<button type="button" class="sec" id="mapAutoSave">Übernehmen</button></div>
+<p class="hint" id="mapSelfHint"></p>
+<div id="mapKnownWrap" hidden><table class="tbl" id="mapKnownTbl"><thead><tr><th>Repeater</th><th>Kennung</th><th>Ort</th><th>gehört</th><th>Karte</th></tr></thead><tbody></tbody></table></div>
+<p class="hint">Trägt dieses Gateway und die von ihm gehörten Repeater/Rooms in die öffentliche Karte <span class="mono">map.meshcore.io</span> ein. Nötig ist nur ein eigenes Advert mit Koordinaten – kein Companion. Der Upload-Schlüssel ist nicht der Knotenschlüssel, sondern ein eigens erzeugtes Paar; nur mit ihm lässt sich ein von ihm angelegter Karteneintrag später aktualisieren. „Zufälligen Upload-Schlüssel erzeugen“ würfelt ihn neu. Hochgeladen werden nur knotensignierte Adverts; der Eintrag erscheint öffentlich im Internet.</p>
+</section>
 </div>
 
 <script>
@@ -492,7 +510,7 @@ function show(v){
   if(v==='status'){lastNb=Date.now();loadNeighbors()}
   if(v==='channels')loadChannels();
   if(v==='sm'){smLoad();zbLoad()}
-  if(v==='wifi'){lgLoad();akLoad()}
+  if(v==='wifi'){lgLoad();akLoad();mapLoad()}
   tick();
 }
 window.onhashchange=()=>show(location.hash.slice(1));
@@ -1689,6 +1707,40 @@ function akUi(){
 }
 function akTake(j){akKey=j.key||'';akSend=j.sendChannel||'';if(j.sendPerHour)$('akPerH').textContent=j.sendPerHour;akUi();akSendFill()}
 async function akLoad(){try{akTake(await (await fetch('/api/apikey',{cache:'no-store'})).json())}catch(e){}}
+/* ---------- Öffentliche Karte (E47) ---------- */
+const mapUpTxt=s=>s===1?'✓':s===2?'Fehler':'–';
+function mapTake(j){
+  set('mapKey',j.hasKey?(j.key.slice(0,8)+'…'+j.key.slice(-8)):'–');
+  set('mapLast',j.lastMsg||'–');
+  if(document.activeElement!==$('mapAuto'))$('mapAuto').value=(j.autoHours!=null?j.autoHours:6);
+  if(j.self){
+    $('mapSelfHint').textContent='Eigener Eintrag: '+j.self.name+(j.self.hasLoc?'':' – ACHTUNG: keine Koordinaten gesetzt, die Karte zeigt ihn dann ohne Position')+' · Status: '+mapUpTxt(j.self.upState);
+  }
+  const tb=$('mapKnownTbl').querySelector('tbody');tb.innerHTML='';
+  (j.known||[]).sort((a,b)=>a.agoS-b.agoS).forEach(k=>{
+    const tr=document.createElement('tr');
+    const td=t=>{const d=document.createElement('td');d.textContent=t;return d};
+    tr.appendChild(td(k.name||'(ohne Name)'));
+    const kc=td(k.key);kc.className='mono';tr.appendChild(kc);
+    tr.appendChild(td(k.hasLoc?'ja':'nein'));
+    tr.appendChild(td('vor '+ago(k.agoS)));
+    tr.appendChild(td(mapUpTxt(k.upState)));
+    tb.appendChild(tr);
+  });
+  $('mapKnownWrap').hidden=!(j.known&&j.known.length);
+  const busy=!!j.busy;['mapSelf','mapKnown','mapNewKey'].forEach(id=>$(id).disabled=busy);
+  if(busy)setTimeout(mapLoad,1500);
+}
+async function mapLoad(){try{mapTake(await (await fetch('/api/mapupload',{cache:'no-store'})).json())}catch(e){}}
+async function mapPost(action,okText,confirmText,extra){
+  if(confirmText&&!confirm(confirmText))return;
+  try{mapTake(await postForm('/api/mapupload',Object.assign({action},extra||{})));$('mapMsg').textContent=okText;$('mapMsg').className='msg ok';setTimeout(mapLoad,1500)}
+  catch(e){$('mapMsg').textContent=e.message;$('mapMsg').className='msg bad'}
+}
+$('mapSelf').onclick=()=>mapPost('self','Eigener Eintrag wird hochgeladen …','Dieses Gateway öffentlich auf map.meshcore.io eintragen (Name und Standort werden sichtbar)?');
+$('mapKnown').onclick=()=>mapPost('known','Bekannte Repeater werden hochgeladen …','Alle gehörten Repeater/Rooms öffentlich auf map.meshcore.io eintragen?');
+$('mapNewKey').onclick=()=>mapPost('newkey','Neuer Upload-Schlüssel erzeugt',$('mapKey').textContent!=='–'?'Neuen Upload-Schlüssel erzeugen? Der bisherige kann seine Karteneinträge danach nicht mehr aktualisieren.':'');
+$('mapAutoSave').onclick=()=>{const h=$('mapAuto').value;mapPost('auto',h>0?'Meldet jetzt alle '+h+' h':'Automatisches Melden aus',null,{hours:h})};
 async function akPost(action,okText,extra){
   try{const j=await postForm('/api/apikey',Object.assign({action},extra||{}));akVisible=!!j.key&&action==='new'?true:akVisible;akTake(j);$('akMsg').textContent=okText;$('akMsg').className='msg ok'}
   catch(e){$('akMsg').textContent=e.message;$('akMsg').className='msg bad'}

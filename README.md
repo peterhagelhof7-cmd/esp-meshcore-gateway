@@ -30,6 +30,7 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind auch ältere Versione
 - Web-Flasher im Browser (Chrome/Edge) mit Versionsauswahl und Erkennung V4 / V4-R8
 - WLAN-Einrichtung über Hotspot, Hostname folgt dem Gerätenamen, NTP-Zeit
 - Statusseiten auf dem OLED-Display, Sicherung und Wiederherstellung der Einstellungen
+- Eintrag in die öffentliche Karte map.meshcore.io – eigener Knoten und gehörte Repeater, manuell oder automatisch
 
 ## Neu in 0.9.0
 
@@ -52,6 +53,15 @@ für Heltec WiFi LoRa 32 V4 und V4-R8. Im Web-Flasher sind auch ältere Versione
 - **Kanal-API:** Kanäle und Nachrichten für andere Systeme im LAN abrufbar, geschützt mit einem API-Schlüssel, der
   auf dem Gerät erzeugt wird – z. B. zum Weiterleiten eines Kanals nach Telegram. Optional Senden in einen
   freigegebenen Kanal (max. 10 pro Stunde), etwa für Unwetter- und Katastrophenwarnungen (DWD, NINA/KATWARN).
+
+## Neu in 0.12.0 (in Erprobung)
+
+- **Öffentliche Karte:** Das Gateway trägt sich und die von ihm gehörten Repeater und Room-Server selbst in die
+  öffentliche MeshCore-Karte [map.meshcore.io](https://map.meshcore.io) ein – ohne Companion-App. Unter System →
+  Öffentliche Karte: „Eigenen Eintrag listen“, „Bekannte Repeater listen“ und ein Feld „Automatisch melden alle N
+  Stunden“ (Standard 6, 0 = aus; gemeldet wird kurz nach dem Start und danach im Intervall). Dazu ein eigener
+  Upload-Schlüssel, der auf dem Gerät erzeugt und neu gewürfelt werden kann. Hochgeladen werden nur knotensignierte
+  Adverts; der Eintrag erscheint öffentlich im Internet.
 
 ## Neu in 0.11.0 (in Erprobung)
 

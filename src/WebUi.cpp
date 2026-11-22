@@ -21,6 +21,7 @@
 #include "OtaUpdate.h"
 #include "Profile.h"
 #include "RemoteAdmin.h"
+#include "MapUploader.h"
 #include "RemoteFormat.h"
 #include "RuleEngine.h"
 #include "SmConfig.h"
@@ -498,6 +499,38 @@ static void handleApiKeyPost(AsyncWebServerRequest* req) {
   }
   gw_config.set(s);
   req->send(200, "application/json", apiKeyJson(s));
+}
+
+// --- Karten-Uploader (E47) ---
+static void handleMapGet(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  req->send(200, "application/json", map_uploader::statusJson());
+}
+static void handleMapPost(AsyncWebServerRequest* req) {
+  if (!checkAuth(req)) return;
+  String action = formParam(req, "action");
+  if (action == "self") {
+    map_uploader::requestSelfUpload();
+  } else if (action == "known") {
+    map_uploader::requestKnownUpload();
+  } else if (action == "newkey") {
+    String err;
+    if (!map_uploader::generateKey(err)) {
+      req->send(400, "application/json", "{\"error\":\"" + jsonEscape(err) + "\"}");
+      return;
+    }
+  } else if (action == "auto") {
+    long h = formParam(req, "hours").toInt();
+    if (h < 0 || h > 168) {
+      req->send(400, "application/json", "{\"error\":\"Stunden 0 (aus) bis 168\"}");
+      return;
+    }
+    map_uploader::setAutoHours((uint16_t)h);
+  } else {
+    req->send(400, "application/json", "{\"error\":\"action = self, known, newkey oder auto\"}");
+    return;
+  }
+  req->send(200, "application/json", map_uploader::statusJson());
 }
 
 // ---------------------------------------------------------------------------
@@ -1055,6 +1088,8 @@ void web_ui::begin() {
   server.on(AsyncURIMatcher::exact("/api/v1/send"), HTTP_POST, handleApiSend);
   server.on(AsyncURIMatcher::exact("/api/apikey"), HTTP_GET, handleApiKeyGet);
   server.on(AsyncURIMatcher::exact("/api/apikey"), HTTP_POST, handleApiKeyPost);
+  server.on(AsyncURIMatcher::exact("/api/mapupload"), HTTP_GET, handleMapGet);
+  server.on(AsyncURIMatcher::exact("/api/mapupload"), HTTP_POST, handleMapPost);
   server.on(AsyncURIMatcher::exact("/api/remote"), HTTP_GET, handleRemoteGet);
   server.on(AsyncURIMatcher::exact("/api/remote/login"), HTTP_POST, handleRemoteLogin);
   server.on(AsyncURIMatcher::exact("/api/remote/cmd"), HTTP_POST, handleRemoteCmd);

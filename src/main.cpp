@@ -22,6 +22,7 @@
 #include "Profile.h"
 #include "RemoteAdmin.h"
 #include "GatewayStatus.h"
+#include "MapUploader.h"
 #include "NetworkManager.h"
 #include "OtaUpdate.h"
 #include "SmConfig.h"
@@ -157,6 +158,7 @@ void setup() {
   board.setInhibitSleep(true);   // WLAN + Webserver vertragen keinen Light-Sleep
   gateway_status::begin();
   gateway_status::update();      // erster Snapshot, bevor der Webserver Anfragen annimmt
+  map_uploader::begin();         // Karten-Uploader (E47): Schlüssel laden, Core-0-Task
   gw_config.begin();
   network.setNameSource([]() -> const char* { return the_mesh.getNodePrefs()->node_name; });
   network.begin();
@@ -270,6 +272,7 @@ void loop() {
     gateway_status::update();
     next_status_update = millis() + STATUS_UPDATE_INTERVAL_MS;
   }
+  map_uploader::loop(the_mesh);   // baut bei Bedarf ein eigenes Advert (E47)
 
   // Powersaving: board.sleep() kehrt wegen setInhibitSleep(true) sofort zurück
   // (ESP32Board::sleep -> delay(1)), der Upstream-Aufruf bleibt trotzdem drin.

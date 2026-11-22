@@ -24,6 +24,10 @@ public:
   uint32_t estAirtime(int len) { return _radio->getEstAirtimeFor(len); }
   uint8_t pathHashSize() { return getNodePrefs()->path_hash_mode + 1; }
 
+  // E47 Karten-Uploader: ein frisches eigenes Advert als Rohpaket (wie
+  // meshcore://… auf der Karte). Nur aus dem loopTask. 0 = fehlgeschlagen.
+  int buildSelfAdvertRaw(uint8_t* dest, size_t max_len);
+
 protected:
   void logRx(mesh::Packet* pkt, int len, float score) override;
   void logTx(mesh::Packet* pkt, int len) override;
