@@ -150,12 +150,19 @@ bestätigt, [-] = entfallen. Befunde und Fixes: `docs/entscheidungen.md` E29.
   Offen: App-Nachricht als `dir: rx`, Ausschalten → 403, `boot` nach Neustart, 429.
 
 ## 15. Akku-Anzeige (E46, 0.11.0) – braucht 1S-LiPo mit passendem Stecker + Multimeter
-- [ ] Ohne Akku, an USB: Status „kein AKKU“ (Grund notieren), Display-Fußzeile „kein AKKU“; `/api/status` →
+- [x] Ohne Akku, an USB: Status „kein AKKU“ (Grund notieren), Display-Fußzeile „kein AKKU“; `/api/status` →
       `battery.mv`, `last_mv`, `spread_mv` über ein paar Minuten notieren (stimmen die Grenzwerte in `BatteryLogic.h`?)
-- [ ] Akku anstecken (an USB): nach ≤ 1 min „AKKU vorhanden“, Ereignis-Log-Eintrag; Spannung mit Multimeter am Akku
-      vergleichen (an USB = Ladespannung)
+- [x] Akku anstecken (an USB): nach ≤ 1 min „AKKU vorhanden“, Ereignis-Log-Eintrag; Spannung mit Multimeter am Akku
+      vergleichen (an USB = Ladespannung) – *Erkennung ja; Multimeter-Vergleich offen (siehe Ergebnis)*
 - [ ] USB abziehen (Akkubetrieb): Gateway läuft weiter, Spannung ≈ Multimeter (±0,1 V), Ladezustand plausibel;
       sonst `set adc.multiplier` abgleichen
 - [ ] Akku im Betrieb abziehen (an USB): nach ≤ 1 min „kein AKKU“ + Log-Eintrag
 - [ ] Regel „Gateway (intern) · Akku < (aktueller Wert + 0,1 V)“ → Meldung; ohne Akku ist der Messwert nicht wählbar
 - [ ] App/anderer Repeater: Status-Abfrage des Gateways liefert dieselbe Spannung (MeshCore `batt_milli_volts`)
+- Ergebnis 2026-11-20 (Gerät 1, ohne Akku, an USB, 3 min): konstant 4384 mV, `spread_mv` 0 → „kein AKKU (zu hoch)“.
+  Nur 34 mV über der Grenze 4350 mV; der Lader ohne Akku schwankt nicht, das Kriterium „Spread > 250 mV“ greift hier also nicht.
+- Ergebnis 2026-11-22 (Gerät 2, Akku fest verbaut, dauerhaft an USB, 0.11.0 per OTA): Ereignis-Log 12 s nach dem Start
+  „AKKU vorhanden (3.98 V, ca. 74 %)“; danach 4 min lang durchgehend „AKKU vorhanden“, 4034–4042 mV, `spread_mv` 0–105,
+  81 %, Spannung steigt (Akku lädt). Image gültig, kein Absturz. → Erkennung mit Akku an USB funktioniert.
+  Am Gerät 2 nicht testbar (Akku unzugänglich): Anstecken/Abziehen im Betrieb, Akkubetrieb ohne USB, Multimeter-Abgleich.
+  Offen: Anzeige bei voll geladenem Akku (Ladeschlussspannung ~4,2 V, sollte unter 4350 mV bleiben), Regel-Test, App-Gegenprobe.
